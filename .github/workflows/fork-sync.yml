@@ -1,0 +1,161 @@
+# Fork addition: weekly merge of JoeKer1/Wholphin-webOS (Ember), German translation of new
+# texts, build of the LG webOS package and release.
+name: Fork sync and release
+
+on:
+  schedule:
+    - cron: "0 2 * * 6"   # Saturday 02:00 UTC
+  workflow_dispatch:
+    inputs:
+      force_release:
+        description: "Release auch ohne Änderungen veröffentlichen"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: fork-sync
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: https://github.com/JoeKer1/Wholphin-webOS.git
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_TOKEN || github.token }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge upstream
+        id: merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The original publishes no webOS releases, so its main branch is merged.
+          git remote add upstream "$UPSTREAM"
+          git fetch --quiet --no-tags upstream main
+          BEHIND=$(git rev-list --count HEAD..upstream/main)
+          echo "behind=$BEHIND" >> "$GITHUB_OUTPUT"
+          if [ "$BEHIND" = "0" ]; then echo "Up to date"; exit 0; fi
+          if ! git merge --no-edit -m "Original eingespielt ($BEHIND Commits)" upstream/main; then
+            FILES=$(git diff --name-only --diff-filter=U | sed 's/^/- /')
+            git merge --abort
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "Abgleich mit dem Original: Merge-Konflikt" \
+              --assignee "${{ github.repository_owner }}" \
+              --body "Der Abgleich mit JoeKer1/Wholphin-webOS ($BEHIND neue Commits) ist an Konflikten gescheitert:
+
+          $FILES
+
+          Bitte von Hand zusammenführen." || true
+            exit 1
+          fi
+
+      - name: Install
+        run: |
+          npm ci
+          npm install -g @webos-tools/cli
+
+      - name: Tests of the original
+        run: npm test
+
+      - name: Translate new UI texts
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node fork/i18n/extract.mjs
+          MISSING=$(node fork/i18n/extract.mjs --missing 2>&1 >/dev/null | grep -o '^[0-9]*')
+          echo "Missing translations: $MISSING"
+          if [ "$MISSING" != "0" ]; then
+            if [ -n "$ANTHROPIC_API_KEY" ]; then
+              node fork/i18n/translate.mjs
+            else
+              node fork/i18n/extract.mjs --missing > missing.txt 2>/dev/null
+              {
+                echo "Ohne ANTHROPIC_API_KEY konnten diese $MISSING Texte nicht automatisch übersetzt werden. Sie erscheinen in der App auf Englisch, bis sie in \`fork/i18n/de.json\` ergänzt sind."
+                echo
+                echo '```'
+                head -c 60000 missing.txt
+                echo '```'
+              } > issue.md
+              OPEN=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "Übersetzung in:title" --json number -q '.[0].number')
+              if [ -n "$OPEN" ]; then
+                gh issue edit "$OPEN" --repo "$GITHUB_REPOSITORY" --title "Übersetzung: $MISSING neue Texte" --body-file issue.md || true
+              else
+                gh issue create --repo "$GITHUB_REPOSITORY" --title "Übersetzung: $MISSING neue Texte" \
+                  --assignee "${{ github.repository_owner }}" --body-file issue.md || true
+              fi
+            fi
+          fi
+          git add fork/i18n
+          git diff --cached --quiet || git commit -q -m "Übersetzung: neue Texte ergänzt"
+
+      - name: Build package
+        run: node fork/build.mjs --package
+
+      - name: Push
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! git push origin HEAD:main 2> push.err; then
+            cat push.err
+            if grep -q "workflows. permission" push.err; then
+              gh issue create --repo "$GITHUB_REPOSITORY" --title "Abgleich mit dem Original: Secret SYNC_TOKEN fehlt" --assignee "${{ github.repository_owner }}" \
+                --body "Das Original hat eine Workflow-Datei geändert. Das Standard-Token darf solche Änderungen nicht pushen.
+
+          Abhilfe: ein Token mit den Rechten *Contents* und *Workflows* für dieses Repo als Secret \`SYNC_TOKEN\` hinterlegen und den Workflow erneut starten." || true
+            fi
+            exit 1
+          fi
+
+      - name: Decide on a release
+        id: decide
+        run: |
+          LAST=$(git describe --tags --abbrev=0 --match 'v*.post*' 2>/dev/null || echo "")
+          if [ -z "$LAST" ] || [ -n "$(git log --oneline "$LAST"..HEAD)" ] || [ "${{ inputs.force_release }}" = "true" ]; then
+            echo "release=yes" >> "$GITHUB_OUTPUT"
+          fi
+          echo "last=$LAST" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release
+        if: steps.decide.outputs.release == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LAST: ${{ steps.decide.outputs.last }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v${VERSION}.post$(date -u +%Y%m%d%H%M)"
+          IPK=$(ls dist/*.ipk)
+          (cd dist && sha256sum "$(basename "$IPK")" > "$(basename "$IPK").sha256")
+          SINCE=${LAST:+^$LAST}
+          {
+            echo "Wholphin für LG webOS mit deutscher Oberfläche, Stand Ember $VERSION (JoeKer1/Wholphin-webOS)."
+            echo
+            echo "**Installieren/aktualisieren:** \`.ipk\` herunterladen und mit dem webOS Dev Manager oder \`ares-install --device <tv> $(basename "$IPK")\` auf den Fernseher laden. Anmeldung und Einstellungen bleiben erhalten."
+            if [ -n "$LAST" ]; then
+              echo
+              echo "### Neu im Original"
+              git log --no-merges --format='- %s ([%h](https://github.com/JoeKer1/Wholphin-webOS/commit/%H))' upstream/main $SINCE | head -80
+            fi
+            echo
+            echo "### Neu im Fork"
+            git log --no-merges --format='- %s' HEAD $SINCE ^upstream/main -- fork .github README.md | head -40
+          } > notes.md
+          git tag "$TAG"
+          git push origin "$TAG"
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" dist/*.ipk dist/*.sha256 --title "Wholphin $TAG" --notes-file notes.md

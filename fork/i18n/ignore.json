@@ -1,0 +1,15 @@
+[
+ "160px 240px", "400px 240px", "500px 0px",
+ "AAC", "ASS", "AV1", "DTS", "FLAC", "HEVC", "HLG", "HDR10+", "MP3", "MPEG-2", "MPEG-4", "Opus", "PGS", "SDR", "SRT", "SSA", "TTML", "VP9", "VTT", "Vorbis", "Mbps", "{0} Mbps", "{0} ch",
+ "DOVI", "DOVIWithHDR10", "DOVI|DOVIWithHDR10", "SDR|HDR10", "SDR|HDR10{0}", "Dolby Vision", "Dolby Digital", "Dolby Digital Plus", "Samsung AVPlay",
+ "ChannelNumber,SortName", "Chapters,MediaSources,MediaStreams", "DateCreated,SortName", "IndexNumber,SortName", "ItemCounts,UserData", "PremiereDate,SortName",
+ "Movie,Series", "Movie,Series,Episode", "Movie,Series,Episode,Video", "Movie,Series,Episode,Video,MusicVideo", "Movie,Video",
+ "Overview,ChannelInfo", "Overview,Genres", "Overview,Genres,Taglines", "Overview,MediaSources,MediaStreams", "Overview,PrimaryImageAspectRatio",
+ "Content-Type", "GET", "POST", "Primary", "Backdrop", "Thumb",
+ "M3 4h18v14H3zM8 22h8M12 18v4", "M4 3h16v18H4zM4 8h16M4 16h16M8 3v18M16 3v18", "M5 4l12 8-12 8ZM20 4v16",
+ "actions episode-browser-actions", "baseline|constrained baseline|main|high", "detail-page season-browser", "grid library-grid", "grid library-grid{0}", "grid tv-category-grid", "main|main 10",
+ "metadata directors", "metadata episode-stream-details", "overview episode-browser-overview", "rail landscape episode-browser-rail library-grid", "rail portrait", "rail {0}",
+ "section:not([hidden]) button", "server-error server-example", "tv-category-page tv-library-page",
+ "{0}:favorite", "{0}:retry", "{0}:watch", "{0}continue", "{0}favorite-movies", "{0}favorite-series", "{0}next", "{0}px", "{0}vw",
+ "kids shows", "kids tv", "tv shows", "valentine's day"
+]
