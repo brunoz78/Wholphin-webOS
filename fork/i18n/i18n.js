@@ -7,8 +7,25 @@
   var KEY = "wholphin-fork-lang",
     LANGS = { de: "Deutsch", en: "English" },
     ATTRS = ["title", "placeholder", "alt"],
-    // The video's own text and user input are never translated.
-    SKIP_IDS = { "subtitle-overlay": 1, "live-preview-caption": 1 },
+    // The video's own text, titles and descriptions from the library and user input are never translated.
+    SKIP_IDS = {
+      "subtitle-overlay": 1,
+      "live-preview-caption": 1,
+      "playing-title": 1,
+      "live-browse-title": 1,
+      "live-browse-overview": 1,
+    },
+    SKIP_CLASSES = [
+      "card-title",
+      "card-subtitle",
+      "detail-title-text",
+      "overview",
+      "up-next-overview",
+      "tagline",
+      "episode-browser-name",
+      "profile-name",
+      "saver-title",
+    ],
     SKIP_TAGS = { SCRIPT: 1, STYLE: 1, TEXTAREA: 1, INPUT: 1, svg: 1, SVG: 1 };
 
   var lang = "de";
@@ -50,6 +67,15 @@
       out: v,
       order: order,
       len: k.replace(/\{\d+\}/g, "").length,
+      // "{0} of {1}" or "Pin {0}" would also match titles such as "Man of the Year";
+      // such loose patterns only apply to numbers or to texts that are translated themselves.
+      loose: (function () {
+        var words = k.replace(/\{\d+\}/g, " ").match(/[A-Za-z]{2,}/g) || [];
+        return (
+          words.length < 2 &&
+          (order.length > 1 || /^(of|as|at|from|no|with|in|by)$/i.test(words[0] || ""))
+        );
+      })(),
     });
   });
   // Most specific pattern first.
@@ -78,6 +104,13 @@
         var p = patterns[j],
           m = key.match(p.re);
         if (!m) continue;
+        if (
+          p.loose &&
+          !m.slice(1).every(function (v) {
+            return /\d/.test(v) || exact.has(norm(v));
+          })
+        )
+          continue;
         out = p.out.replace(/\{(\d+)\}/g, function (_, n) {
           var v = m[p.order.indexOf(+n) + 1] || "";
           if (depth >= 2) return v;
@@ -86,6 +119,17 @@
         });
         break;
       }
+    // Lines joined with " · " ("Embedded · No burn-in", "· Ends at 16:45"): translate each part.
+    if (out == null && depth < 2 && /(^|\s)·\s/.test(key)) {
+      var changed = false,
+        parts = key.split(/((?:^|\s)·\s)/).map(function (part, i) {
+          if (i % 2 || !part) return part;
+          var t = translate(part, depth + 1);
+          if (t != null && t !== part) changed = true;
+          return t == null ? part : t;
+        });
+      if (changed) out = parts.join("");
+    }
     if (out != null) values.add(norm(out));
     if (cache.size > 5000) cache.clear();
     cache.set(key, out);
@@ -94,9 +138,14 @@
 
   // ---- DOM ----------------------------------------------------------------
   var written = new WeakMap();
+  function skipClass(n) {
+    for (var i = 0; i < SKIP_CLASSES.length; i++)
+      if (n.classList && n.classList.contains(SKIP_CLASSES[i])) return true;
+    return false;
+  }
   function skipped(node) {
     for (var n = node; n && n.nodeType === 1; n = n.parentNode) {
-      if (SKIP_TAGS[n.nodeName] || SKIP_IDS[n.id]) return true;
+      if (SKIP_TAGS[n.nodeName] || SKIP_IDS[n.id] || skipClass(n)) return true;
       if (n.hasAttribute("data-no-i18n")) return true;
     }
     return false;
@@ -128,7 +177,7 @@
     }
     var tw = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
       acceptNode: function (n) {
-        if (n.nodeType === 1 && (SKIP_TAGS[n.nodeName] || SKIP_IDS[n.id] || n.hasAttribute("data-no-i18n")))
+        if (n.nodeType === 1 && (SKIP_TAGS[n.nodeName] || SKIP_IDS[n.id] || skipClass(n) || n.hasAttribute("data-no-i18n")))
           return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       },

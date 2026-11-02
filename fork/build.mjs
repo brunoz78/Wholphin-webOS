@@ -44,6 +44,23 @@ html = html
   .replace("<strong>Ember</strong>", "<strong>Wholphin</strong>");
 await fs.writeFile(path.join(out, "index.html"), html);
 
+// Code patches on the built copy. Each one fails the build if the original code moved,
+// so a change of the original is noticed instead of silently dropping the feature.
+async function patch(file, from, to, why) {
+  const p = path.join(out, file),
+    code = await fs.readFile(p, "utf8");
+  if (!code.includes(from)) throw new Error(`Patch "${why}" no longer fits ${file}`);
+  await fs.writeFile(p, code.replace(from, to));
+}
+// ASS/SSA as text on the TV: Jellyfin converts them to WebVTT (Stream.vtt), so they no longer
+// need burn-in and transcoding. Styling of ASS (fonts, positions, effects) is not kept.
+await patch(
+  "core.js",
+  '["srt", "subrip", "vtt", "webvtt"].indexOf(',
+  '["srt", "subrip", "vtt", "webvtt", "ass", "ssa", "mov_text"].indexOf(',
+  "ASS/SSA as text",
+);
+
 // App entry on the TV: own ID, so it installs next to the original.
 const info = JSON.parse(await fs.readFile(path.join(out, "appinfo.json"), "utf8"));
 for (const f of [info.icon, info.largeIcon]) await fs.rm(path.join(out, f), { force: true });
