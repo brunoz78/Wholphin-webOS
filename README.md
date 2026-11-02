@@ -95,3 +95,31 @@ suspension prevent or dismiss it. Empty/error artwork responses retain a moving
 Ember title on black. This operates inside Ember; it does not replace or disable
 the TV's system screensaver. Run `npm run test:screensaver` for the three-platform
 fixture checks.
+
+### Profile subtitle defaults
+
+Settings → Subtitles → Subtitle defaults offers remembered choices, preferred
+language when available, or Off. English captions for known non-English audio
+are enabled by default and can be disabled separately. Defaults, remembered
+choices and title overrides belong to the signed-in profile on this device;
+selecting Off on one profile does not change another. An explicit title choice
+wins over automatic defaults. Missing preferred subtitles stay off, and unknown
+audio language does not trigger the non-English rule. Automatic selection favors
+text subtitles over bitmap tracks when both are available.
+
+LG/Tizen can extract ASS/SSA as plain WebVTT instead of burning it into video.
+This loses ASS styling/positioning; bitmap captions and failed text extraction
+retain the conversion fallback. Fire TV retains its native ASS renderer by
+default. Run `npm run test:subtitle-defaults` for cross-platform coverage.
+
+### Anime audio language
+
+Settings → Playback → Anime audio language chooses Japanese, English or another
+supported language for this profile on this TV. It defaults to the normal audio
+preference. Anime is identified through a library with Anime in its name, item
+ancestry, or an explicit Anime genre (Animation alone is not treated as anime).
+The rule also runs when starting an episode through Continue watching or
+autoplay; manual in-player audio selection takes priority for that playback.
+Missing preferred audio falls back to the normal profile/server choice. Subtitle
+defaults use the selected audio language, so Japanese audio can automatically
+enable English captions. Run `npm run test:anime-audio` for platform checks.

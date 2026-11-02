@@ -589,6 +589,36 @@
         ? -1
         : undefined;
   }
+  function animeItem(item, libraries, ancestors) {
+    var anime = (libraries || []).filter(function (l) { return /\banime\b/i.test(l.Name || ""); }),
+      ids = anime.map(function (l) { return l.Id; });
+    return (item.Genres || []).some(function (g) { return /^anime$/i.test(g); }) ||
+      ids.indexOf(item.ParentId) >= 0 ||
+      (ancestors || []).some(function (a) { return ids.indexOf(a.Id) >= 0 || (a.Type === "CollectionFolder" && /\banime\b/i.test(a.Name || "")); });
+  }
+  function animeAudio(source, language, remembered) {
+    var normal = preferredTrack(source, "Audio", remembered),
+      match = language && preferredTrack(source, "Audio", {language: language});
+    return Number.isInteger(match) && match >= 0 ? match : normal;
+  }
+  function defaultSubtitle(source, audioIndex, options, remembered) {
+    options = options || {};
+    var streams = source.MediaStreams || [],
+      audio = streams.find(function (s) { return s.Type === "Audio" && s.Index === (audioIndex == null ? source.DefaultAudioStreamIndex : audioIndex); }),
+      language = audio && trackLanguage(audio.Language);
+    function match(code) {
+      var plain = Object.assign({}, source, {MediaStreams: streams.filter(function (s) { return s.Type !== "Subtitle" || textSubtitle(source, s.Index); })}),
+        index = preferredTrack(plain, "Subtitle", {language: code, forced: false});
+      return index >= 0 ? index : preferredTrack(source, "Subtitle", {language: code, forced: false});
+    }
+    if (options.foreignEnglish !== false && language && language !== trackLanguage("eng")) {
+      var english = match("eng");
+      if (english >= 0) return english;
+    }
+    if (options.mode === "off") return -1;
+    if (options.mode === "language") return match(options.language || "eng");
+    return preferredTrack(source, "Subtitle", remembered);
+  }
   function libraryQuery(id, options, offset, type) {
     var sorts = {
       "episode-asc": ["IndexNumber,SortName", "Ascending"],
@@ -1055,7 +1085,7 @@
       return (
         track.Type === "Subtitle" &&
         track.Index === index &&
-        ["srt", "subrip", "vtt", "webvtt"].indexOf(
+        ["srt", "subrip", "vtt", "webvtt", "ass", "ssa"].indexOf(
           String(track.Codec || "").toLowerCase(),
         ) >= 0 &&
         track.IsTextSubtitleStream !== false
@@ -1209,6 +1239,9 @@
     subtitleTimingKey: subtitleTimingKey,
     trackPreference: trackPreference,
     preferredTrack: preferredTrack,
+    defaultSubtitle: defaultSubtitle,
+    animeItem: animeItem,
+    animeAudio: animeAudio,
     chapters: chapters,
     libraryQuery: libraryQuery,
     libraryWindow: libraryWindow,

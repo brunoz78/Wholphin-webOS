@@ -138,7 +138,7 @@
       P.deviceName +
       '", DeviceId="' +
       device +
-      '", Version="0.2.73"' +
+      '", Version="0.2.76"' +
       (context && context.token ? ', Token="' + context.token + '"' : "")
     );
   }
@@ -822,7 +822,21 @@
         return go(queuePage);
       },
     );
+    row(playback, "Anime audio language", function () {
+      var code = readPreference("audio-defaults", {}).animeLanguage;
+      return {jpn: "Japanese", eng: "English", spa: "Spanish", fra: "French", deu: "German", kor: "Korean", zho: "Chinese"}[code] || "Use normal audio preference";
+    }, "For Anime libraries and titles tagged with the Anime genre. Saved only for this profile on this TV.", function (control) {
+      var choices = [["", "Use normal audio preference"], ["jpn", "Japanese"], ["eng", "English"], ["spa", "Spanish"], ["fra", "French"], ["deu", "German"], ["kor", "Korean"], ["zho", "Chinese"]];
+      settingChoices("Anime audio language", choices, readPreference("audio-defaults", {}).animeLanguage || "", function (value) {
+        localStorage.setItem(accountKey("audio-defaults"), JSON.stringify({animeLanguage: value}));
+        control.refreshSetting();
+      }, control);
+    }, function () {
+      var code = readPreference("audio-defaults", {}).animeLanguage;
+      return "Anime audio language: " + ({jpn: "Japanese", eng: "English", spa: "Spanish", fra: "French", deu: "German", kor: "Korean", zho: "Chinese"}[code] || "Use normal audio preference");
+    });
     var subtitles = section("Subtitles", "Keep dialogue comfortable to read.");
+    row(subtitles, "Subtitle defaults", "", "Preferred language and English subtitles for non-English audio, saved per profile.", function () { return go(subtitleDefaultsSettings); });
     row(
       subtitles,
       "Subtitle appearance",
@@ -916,7 +930,7 @@
       vision.hidden = true;
     }
     row(device, "Screensaver", "", "Artwork, idle delay and clock for this profile.", function () { return go(screensaverSettings); });
-    var about = section("About", "Ember for Jellyfin · v0.2.73");
+    var about = section("About", "Ember for Jellyfin · v0.2.76");
     var server = el("p", "Connected to " + session.server, about);
     server.className = "settings-description";
     row(
@@ -5220,11 +5234,10 @@
           chosen =
             saved && saved.source === source.Id
               ? saved.index
-              : C.preferredTrack(
-                  source,
-                  "Subtitle",
-                  readPreference("track-preferences", {}).Subtitle,
-                );
+              : C.defaultSubtitle(source,
+                  await defaultAudio(item, source),
+                  subtitleDefaults(), readPreference("track-preferences", {}).Subtitle);
+        if (!subtitlePicker.isConnected) return;
         if (chosen == null) chosen = source.DefaultSubtitleStreamIndex;
         if (
           !tracks.some(function (track) {
@@ -5948,6 +5961,55 @@
       }
     };
   }
+  var animeAncestry = new Map();
+  async function defaultAudio(item, source, signal) {
+    var remembered = readPreference("track-preferences", {}).Audio,
+      language = readPreference("audio-defaults", {}).animeLanguage;
+    if (!language) return C.preferredTrack(source || {}, "Audio", remembered);
+    var anime = C.animeItem(item, libraryItems, []),
+      key = accountKey("anime-ancestry:") + (item.SeriesId || item.Id);
+    if (!anime) {
+      var ancestors = animeAncestry.get(key);
+      if (!ancestors) {
+        try {
+          ancestors = await api("/Items/" + encodeURIComponent(item.SeriesId || item.Id) + "/Ancestors", {UserId: session.user}, null, "GET", {signal: signal, timeoutMs: 4000});
+          if (!Array.isArray(ancestors)) ancestors = [];
+          animeAncestry.set(key, ancestors);
+          if (animeAncestry.size > 200) animeAncestry.delete(animeAncestry.keys().next().value);
+        } catch (error) {
+          if (signal && signal.aborted) throw error;
+          return C.preferredTrack(source || {}, "Audio", remembered);
+        }
+      }
+      anime = C.animeItem(item, libraryItems, ancestors);
+    }
+    return anime ? C.animeAudio(source || {}, language, remembered) : C.preferredTrack(source || {}, "Audio", remembered);
+  }
+  function subtitleDefaults() {
+    return Object.assign({mode: "remember", language: "eng", foreignEnglish: true}, readPreference("subtitle-defaults", {}));
+  }
+  function subtitleDefaultsSettings() {
+    reset("Subtitle defaults");
+    el("p", "Saved only for this profile on this TV. A manual choice for a title takes priority.", main);
+    var options = subtitleDefaults(), list = el("div", null, main);
+    list.className = "screensaver-settings";
+    function choice(key, label, choices) {
+      var control = button("", function () {
+        settingChoices(label, choices, options[key], function (value) {
+          options[key] = value;
+          localStorage.setItem(accountKey("subtitle-defaults"), JSON.stringify(options));
+          refresh();
+        }, control);
+      }, list);
+      function refresh() { var current = choices.find(function (v) { return v[0] === options[key]; }) || choices[0]; control.textContent = label + ": " + current[1]; }
+      refresh();
+    }
+    choice("mode", "Default subtitles", [["remember", "Remember last choice"], ["language", "Preferred language when available"], ["off", "Off"]]);
+    choice("language", "Preferred language", [["eng", "English"], ["spa", "Spanish"], ["fra", "French"], ["deu", "German"], ["ita", "Italian"], ["por", "Portuguese"], ["jpn", "Japanese"], ["kor", "Korean"], ["zho", "Chinese"], ["hin", "Hindi"]]);
+    choice("foreignEnglish", "English for non-English audio", [[true, "On"], [false, "Off"]]);
+    el("p", "When enabled, English subtitles are selected for known non-English audio if a matching track is available. Missing or unknown audio languages do not trigger this rule.", main);
+    focusContent(list.querySelector("button"));
+  }
   function subtitleOptions() {
     var style = C.subtitleStyle(readPreference("subtitle-appearance", { enabled: !P.nativeSubtitle }));
     // Legacy appearance delays are global and must never carry into another video.
@@ -6099,7 +6161,7 @@
         closeChoices();
       }
     });
-    var note = el("p", "Custom appearance applies to SRT and WebVTT text. Other formats keep their original appearance. Adjust timing from the player Options menu.", editor);
+    var note = el("p", "SRT and WebVTT support custom appearance. ASS/SSA can be converted to plain text on this TV; original styling is not preserved. Adjust timing from player Options.", editor);
     note.className = "subtitle-editor-note";
     var actions = el("div", null, editor);
     actions.className = "subtitle-editor-actions";
@@ -6692,6 +6754,7 @@
     var preference = C.trackPreference(active.source, type, index);
     if ((subtitle ? active.subtitleIndex : active.audioIndex) === index) {
       rememberTrack(type, preference);
+      if (subtitle) saveSubtitleChoice(active.item.Id, active.source, index);
       closePlaybackPanel();
       return;
     }
@@ -6732,6 +6795,14 @@
         message("Could not change subtitles in place. " + error.message);
       } finally { busy = false; }
     }
+    var nextSubtitle = active.subtitleIndex;
+    if (!subtitle && nextSubtitle < 0) {
+      var manualSubtitle = readPreference("subtitle-choices", {})[active.item.Id];
+      if (!(manualSubtitle && manualSubtitle.source === active.source.Id && manualSubtitle.index === -1)) {
+        var automatic = C.defaultSubtitle(active.source, index, {mode: "off", foreignEnglish: subtitleDefaults().foreignEnglish});
+        if (automatic >= 0) nextSubtitle = automatic;
+      }
+    }
     var ticks = position(),
       paused = video.paused;
     video.pause();
@@ -6742,7 +6813,7 @@
         paused: paused,
         mediaSourceId: active.source.Id,
         audioIndex: subtitle ? active.audioIndex : index,
-        subtitleIndex: subtitle ? index : active.subtitleIndex,
+        subtitleIndex: subtitle ? index : nextSubtitle,
       });
     } catch (error) {
       if (playing === active && !paused) await video.play();
@@ -7083,6 +7154,7 @@
           subtitleOptions().enabled ||
           preferences.Audio ||
           preferences.Subtitle ||
+          subtitleDefaults().mode !== "remember" || subtitleDefaults().foreignEnglish || readPreference("audio-defaults", {}).animeLanguage ||
           ((options.audioIndex != null || options.subtitleIndex != null) &&
             !options.mediaSourceId))
       ) {
@@ -7112,18 +7184,15 @@
             );
           });
         if (sourceMetadata) options.mediaSourceId = sourceMetadata.Id;
-        if (preferences.Audio)
-          options.audioIndex = C.preferredTrack(
-            sourceMetadata || {},
-            "Audio",
-            preferences.Audio,
-          );
-        if (preferences.Subtitle && options.subtitleIndex == null)
-          options.subtitleIndex = C.preferredTrack(
-            sourceMetadata || {},
-            "Subtitle",
-            preferences.Subtitle,
-          );
+        if (!options.trackChange && options.audioIndex == null)
+          options.audioIndex = await defaultAudio(item, sourceMetadata || {}, controller.signal);
+        if (!options.trackChange && options.subtitleIndex == null) {
+          var savedSubtitle = readPreference("subtitle-choices", {})[item.Id];
+          options.subtitleIndex = savedSubtitle && sourceMetadata && savedSubtitle.source === sourceMetadata.Id &&
+            (savedSubtitle.index === -1 || (sourceMetadata.MediaStreams || []).some(function (s) { return s.Type === "Subtitle" && s.Index === savedSubtitle.index; }))
+            ? savedSubtitle.index
+            : C.defaultSubtitle(sourceMetadata || {}, options.audioIndex, subtitleDefaults(), preferences.Subtitle);
+        }
         if (
           options.audioIndex != null ||
           (options.subtitleIndex != null &&
@@ -7199,7 +7268,7 @@
         native: nativeMode,
         dolbyVision: decoder.dolbyVision,
       });
-      if (nativeMode && P.playbackProfile) deviceProfile = P.playbackProfile(C.profile());
+      if (nativeMode && P.playbackProfile) deviceProfile = P.playbackProfile(C.profile(), sourceMetadata);
       var forceTranscode =
         !!live || !!options.compatibility ||
         (!(nativeMode && P.playbackPolicy) && (!!options.trackChange || !!subtitleCues || !!options.applyPreferences));
@@ -7218,7 +7287,7 @@
           : nativeMode ? 6 : 2,
         AudioStreamIndex: options.audioIndex,
         SubtitleStreamIndex: subtitleCues ? -1 : options.subtitleIndex,
-        MediaSourceId: options.mediaSourceId,
+        MediaSourceId: options.mediaSourceId || (nativeMode && P.playbackProfile && sourceMetadata ? sourceMetadata.Id : undefined),
       };
       var info = await playbackApi(
         "/Items/" + encodeURIComponent(item.Id) + "/PlaybackInfo",
