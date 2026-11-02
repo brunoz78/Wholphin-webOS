@@ -111,11 +111,62 @@ await patch(
 await patch(
   "app.js",
   "return detail(item.Id, !!item.IsLiveProgram);",
-  "return item.Type === \"Episode\" && item.SeasonId && item.SeriesId && !item.IsLiveProgram &&\n" +
+  "return item.Type === \"Playlist\"\n" +
+    "              ? forkPlaylist(item)\n" +
+    "              : item.Type === \"Episode\" && item.SeasonId && item.SeriesId && !item.IsLiveProgram &&\n" +
     "              !main.classList.contains(\"season-browser\")\n" +
     "              ? forkEpisodeSeason(item)\n" +
     "              : detail(item.Id, !!item.IsLiveProgram);",
-  "Episode opens season view",
+  "Episode opens season view, playlist opens its items",
+);
+// A playlist opens its items directly (no detail page and "Browse" step), loaded at once.
+// Episodes are shown as their series, once, in playlist order: watchlists synced from Plex
+// (e.g. by CrossWatch) list every single episode of a series.
+await patch(
+  "app.js",
+  "  async function seasonsPage(seriesId) {",
+  "  async function forkPlaylist(item) {\n" +
+    "    var r = reset(item.Name);\n" +
+    "    main.className = \"library-page fork-playlist-page\";\n" +
+    "    var info = el(\"p\", \"Loading…\", main);\n" +
+    "    info.className = \"metadata\";\n" +
+    "    var data = await api(\"/Playlists/\" + encodeURIComponent(item.Id) + \"/Items\", {\n" +
+    "      UserId: session.user,\n" +
+    "      Fields: \"PrimaryImageAspectRatio,ProductionYear\",\n" +
+    "    });\n" +
+    "    if (r !== revision) return;\n" +
+    "    var entries = [], seriesIds = [], seen = {};\n" +
+    "    (data.Items || []).forEach(function (entry) {\n" +
+    "      if (entry.Type === \"Episode\" && entry.SeriesId) {\n" +
+    "        if (seen[entry.SeriesId]) return;\n" +
+    "        seen[entry.SeriesId] = true;\n" +
+    "        seriesIds.push(entry.SeriesId);\n" +
+    "        entries.push({ seriesId: entry.SeriesId, episode: entry });\n" +
+    "      } else entries.push(entry);\n" +
+    "    });\n" +
+    "    var series = {};\n" +
+    "    if (seriesIds.length) {\n" +
+    "      var found = await api(\"/Users/\" + session.user + \"/Items\", {\n" +
+    "        Ids: seriesIds.join(\",\"),\n" +
+    "        Fields: \"PrimaryImageAspectRatio,ProductionYear\",\n" +
+    "      });\n" +
+    "      if (r !== revision) return;\n" +
+    "      (found.Items || []).forEach(function (s) { series[s.Id] = s; });\n" +
+    "    }\n" +
+    "    var items = entries.map(function (entry) {\n" +
+    "      return entry.seriesId ? series[entry.seriesId] || entry.episode : entry;\n" +
+    "    });\n" +
+    "    info.textContent = items.length + \" items loaded\";\n" +
+    "    if (!items.length) { el(\"p\", \"No items found.\", main); return; }\n" +
+    "    var grid = cards(items, main);\n" +
+    "    var restoreFrame = stack[stack.length - 1];\n" +
+    "    var restore = Array.prototype.find.call(grid.children, function (card) {\n" +
+    "      return restoreFrame && card.dataset.item === restoreFrame.focus;\n" +
+    "    });\n" +
+    "    (restore || grid.firstElementChild).focus();\n" +
+    "  }\n" +
+    "  async function seasonsPage(seriesId) {",
+  "Playlist page",
 );
 await patch(
   "app.js",
