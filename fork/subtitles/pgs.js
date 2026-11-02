@@ -1,8 +1,9 @@
-/* Fork addition: PGS (Blu-ray) subtitles drawn on the TV instead of burned in by the server.
+/* Fork addition: subtitles shown by the TV without delaying playback, including PGS (Blu-ray).
    Loaded between core.js and app.js. The app keeps its normal flow for text subtitles:
    - WholphinCore.textSubtitle also accepts PGS tracks, so the video is requested without burn-in;
-   - the app's request for ".../Subtitles/<n>/Stream.vtt" is answered with the decoded Stream.sup;
-   - WholphinCore.subtitleText returns no text for PGS and the bitmaps are drawn on a canvas.
+   - the app's request for ".../Subtitles/<n>/Stream.vtt" is answered at once with a placeholder,
+     the track (Stream.vtt, or Stream.sup for PGS) is loaded in the background;
+   - WholphinCore.subtitleText shows the track once loaded; PGS bitmaps are drawn on a canvas.
    Written for Chromium 79 (webOS 6): no optional chaining or ?? operator. */
 (function () {
   "use strict";
@@ -182,36 +183,77 @@
     return cues;
   }
 
-  // ---- answering the app's subtitle request ---------------------------------------
-  var nativeFetch = window.fetch.bind(window);
+  // ---- answering the app's subtitle request in the background ----------------------
+  // The app waits for the subtitle file before it starts the video and gives up after 20 s;
+  // then it lets the server burn the subtitles in, which forces Compatibility (H.264). Extracting
+  // a track from a large MKV the first time often takes longer than that. So the request is
+  // answered at once with a placeholder, the video starts natively, and the track is loaded in
+  // the background without a time limit and shown as soon as it arrives.
+  var nativeFetch = window.fetch.bind(window),
+    parseSubtitles = C.parseSubtitles;
+
+  function readLimited(response) {
+    if (Number(response.headers.get("content-length")) > MAX_BYTES) throw new Error("Subtitle file is too large.");
+    return response.arrayBuffer().then(function (data) {
+      if (data.byteLength > MAX_BYTES) throw new Error("Subtitle file is too large.");
+      return new Uint8Array(data);
+    });
+  }
+
+  function load(entry, url, init, pgs) {
+    var headers = (init && init.headers) || {};
+    nativeFetch(pgs ? url.replace("/Stream.vtt", "/Stream.sup") : url, {
+      method: "GET",
+      headers: headers,
+      credentials: "omit",
+      cache: "no-store",
+      referrerPolicy: "no-referrer",
+      signal: entry.controller.signal,
+    })
+      .then(function (response) {
+        if (!response.ok) throw new Error("Jellyfin request failed (" + response.status + ").");
+        return readLimited(response);
+      })
+      .then(function (data) {
+        entry.cues = pgs ? cueList(parse(data)) : parseSubtitles(new TextDecoder("utf-8").decode(data));
+        entry.pgs = pgs;
+      })
+      .catch(function (error) {
+        if (error && error.name === "AbortError") return;
+        entry.cues = [];
+        if (window.console) console.warn("Wholphin subtitles:", error && error.message);
+      });
+  }
+
   window.fetch = function (input, init) {
     var url = typeof input === "string" ? input : input && input.url,
       m = url && url.match(/\/Videos\/[^/]+\/([^/]+)\/Subtitles\/(\d+)\/Stream\.vtt(\?|$)/);
-    if (!m || !pgsTracks[decodeURIComponent(m[1]) + ":" + m[2]]) return nativeFetch(input, init);
-    return nativeFetch(url.replace("/Stream.vtt", "/Stream.sup"), init).then(function (response) {
-      if (!response.ok) return response;
-      if (Number(response.headers.get("content-length")) > MAX_BYTES) throw new Error("Subtitle file is too large.");
-      return response.arrayBuffer().then(function (data) {
-        if (data.byteLength > MAX_BYTES) throw new Error("Subtitle file is too large.");
-        var cues = cueList(parse(new Uint8Array(data)));
-        if (!cues.length) throw new Error("No subtitle cues were returned.");
-        var id = "pgs" + nextId++;
-        cues.pgs = id;
-        loaded = {}; // keep only the newest track in memory
-        loaded[id] = cues;
-        return new Response("WEBVTT\n\nNOTE wholphin-pgs " + id + "\n", {
-          status: 200,
-          headers: { "Content-Type": "text/vtt" },
-        });
-      });
-    });
+    if (!m) return nativeFetch(input, init);
+    var id = "sub" + nextId++,
+      entry = { url: url, cues: null, pgs: false, controller: new AbortController() };
+    // Keep the newest few tracks; the app may switch back to the previous one.
+    var ids = Object.keys(loaded);
+    if (ids.length >= 3) {
+      loaded[ids[0]].controller.abort();
+      delete loaded[ids[0]];
+    }
+    loaded[id] = entry;
+    load(entry, url, init, !!pgsTracks[decodeURIComponent(m[1]) + ":" + m[2]]);
+    return Promise.resolve(
+      new Response("WEBVTT\n\nNOTE wholphin-sub " + id + "\n", {
+        status: 200,
+        headers: { "Content-Type": "text/vtt" },
+      }),
+    );
   };
 
-  var parseSubtitles = C.parseSubtitles;
   C.parseSubtitles = function (value) {
-    var m = typeof value === "string" && value.match(/^WEBVTT\n\nNOTE wholphin-pgs (pgs\d+)\n$/);
-    if (m && loaded[m[1]]) return loaded[m[1]];
-    return parseSubtitles(value);
+    var m = typeof value === "string" && value.match(/^WEBVTT\n\nNOTE wholphin-sub (sub\d+)\n$/);
+    if (!m || !loaded[m[1]]) return parseSubtitles(value);
+    // The app rejects an empty list, so the placeholder holds one empty cue.
+    var cues = [{ start: 0, end: 0, maxEnd: 0, text: "" }];
+    cues.lazy = m[1];
+    return cues;
   };
 
   // ---- drawing ------------------------------------------------------------------
@@ -308,6 +350,12 @@
 
   var subtitleText = C.subtitleText;
   C.subtitleText = function (cues, seconds, offset) {
+    if (cues && cues.lazy) {
+      var entry = loaded[cues.lazy];
+      // Still loading (or failed): nothing to show yet.
+      cues = entry && entry.cues && entry.cues.length ? entry.cues : [];
+      if (entry && entry.pgs) cues.pgs = cues.pgs || cues.lazy || "pgs";
+    }
     if (cues && cues.pgs) {
       var wasActive = active;
       active = cues;

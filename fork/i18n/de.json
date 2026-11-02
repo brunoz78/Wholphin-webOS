@@ -642,6 +642,7 @@
   "out of 10": "von 10",
   "with Jellyfin compatibility transcoding.": "mit Kompatibilitäts-Transcoding von Jellyfin.",
   "your profile": "dein Profil",
+  "{0} (+{1})": "{0} (+{1})",
   "{0} (Compatibility)": "{0} (Kompatibilität)",
   "{0} Episodes": "{0} Folgen",
   "{0} Movies": "{0} Filme",
