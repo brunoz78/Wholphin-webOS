@@ -44,6 +44,7 @@ await fs.copyFile(path.join(fork, "playback/codecs.js"), path.join(out, "codecs.
 await fs.copyFile(path.join(fork, "playback/stats.js"), path.join(out, "stats.js"));
 await fs.copyFile(path.join(fork, "login.js"), path.join(out, "login.js"));
 await fs.copyFile(path.join(fork, "nav.js"), path.join(out, "nav.js"));
+await fs.copyFile(path.join(fork, "extras.js"), path.join(out, "extras.js"));
 await fs.copyFile(path.join(fork, "style.css"), path.join(out, "fork.css"));
 
 // Page: load the translation before the app, show the Wholphin name.
@@ -57,7 +58,7 @@ html = html
   .replace(
     appHook,
     '<script src="pgs.js"></script>\n    <script src="codecs.js"></script>\n    <script src="login.js"></script>\n    ' + appHook +
-      '\n    <script src="stats.js"></script>\n    <script src="nav.js"></script>',
+      '\n    <script src="stats.js"></script>\n    <script src="nav.js"></script>\n    <script src="extras.js"></script>',
   )
   .replace('<link rel="stylesheet" href="style.css" />', '<link rel="stylesheet" href="style.css" /><link rel="stylesheet" href="fork.css" />')
   .replace(/<title>[^<]*<\/title>/, "<title>Wholphin</title>")
@@ -191,6 +192,25 @@ await patch(
     "  }\n" +
     "  async function seasonsPage(seriesId) {",
   "Episode opens season view (helper)",
+);
+
+// Rewind on resume (fork/extras.js): resuming starts a few seconds before the saved position.
+await patch(
+  "app.js",
+  "      var decoder = decoderOptions(),",
+  "      if (!live && !options.trackChange && ticks > 0 && window.WholphinResumeRewind)\n" +
+    "        ticks = Math.max(0, ticks - window.WholphinResumeRewind() * 10000000);\n" +
+    "      var decoder = decoderOptions(),",
+  "Rewind on resume",
+);
+// List view of libraries (fork/extras.js): the virtual grid needs the list's row height.
+await patch(
+  "app.js",
+  "      rowHeight = width * (seasonContext ? 0.5625 : 1.5) + 75 + 32;",
+  "      rowHeight = window.WholphinListRow && main.classList.contains(\"fork-list-view\") && !seasonContext\n" +
+    "        ? window.WholphinListRow\n" +
+    "        : width * (seasonContext ? 0.5625 : 1.5) + 75 + 32;",
+  "Library list view",
 );
 
 // App entry on the TV: own ID, so it installs next to the original.
