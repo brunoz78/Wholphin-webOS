@@ -33,13 +33,17 @@ await fs.writeFile(
   "window.WHOLPHIN_I18N = " + JSON.stringify({ de: { strings: de.strings, rules: de.rules }, en }) + ";\n",
 );
 await fs.copyFile(path.join(fork, "i18n/i18n.js"), path.join(out, "i18n.js"));
+await fs.copyFile(path.join(fork, "subtitles/pgs.js"), path.join(out, "pgs.js"));
 
 // Page: load the translation before the app, show the Wholphin name.
 let html = await fs.readFile(path.join(out, "index.html"), "utf8");
-const hook = '<script src="core.js"></script>';
-if (!html.includes(hook)) throw new Error("index.html changed: script hook for the translation not found");
+const hook = '<script src="core.js"></script>',
+  appHook = '<script src="app.js"></script>';
+if (!html.includes(hook) || !html.includes(appHook)) throw new Error("index.html changed: script hooks of the fork not found");
 html = html
   .replace(hook, '<script src="i18n-data.js"></script>\n    <script src="i18n.js"></script>\n    ' + hook)
+  // PGS subtitles hook into WholphinCore, so they load after core.js and before app.js.
+  .replace(appHook, '<script src="pgs.js"></script>\n    ' + appHook)
   .replace(/<title>[^<]*<\/title>/, "<title>Wholphin</title>")
   .replace("<strong>Ember</strong>", "<strong>Wholphin</strong>");
 await fs.writeFile(path.join(out, "index.html"), html);

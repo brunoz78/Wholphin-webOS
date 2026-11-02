@@ -12,6 +12,8 @@ This fork provides:
 
 - **German interface** by default, English selectable under *Settings → Language*.
 - **Wholphin name and icon**, own app ID `ch.brunoz78.wholphin`.
+- **More subtitles without burn-in:** PGS (Blu-ray) is drawn by the TV itself,
+  ASS/SSA and `mov_text` are shown as text. The server no longer has to transcode for them.
 - **Weekly updates:** changes of the base project are merged, new texts translated and published as a
   [release](https://github.com/brunoz78/Wholphin-webOS/releases) with a ready-made `.ipk`.
 
@@ -23,7 +25,8 @@ For Android TV and Fire TV, use the [original Wholphin](https://github.com/damon
 - Sign-in with password or Quick Connect, customizable Home screen
 - Libraries, seasons, search, favorites, filters and sorting
 - Resume, audio and subtitle selection, chapters, queue, autoplay of the next episode
-- SRT and WebVTT subtitles rendered on the TV with adjustable appearance and timing
+- Subtitles rendered on the TV: SRT, WebVTT, ASS/SSA and `mov_text` as text with adjustable appearance,
+  PGS as images; timing adjustable for all. DVD subtitles are still burned in by the server.
 - Live TV with guide and favorite channels
 - Remote and Magic Remote control, screensaver
 

@@ -12,6 +12,8 @@ Dieser Fork bietet:
 
 - **Deutsche Oberfläche** als Standard, Englisch umschaltbar unter *Einstellungen → Sprache*.
 - **Name und Symbol Wholphin**, eigene App-ID `ch.brunoz78.wholphin`.
+- **Mehr Untertitel ohne Einbrennen:** PGS (Blu-ray) zeichnet der Fernseher selbst,
+  ASS/SSA und `mov_text` erscheinen als Text. Der Server muss dafür nicht mehr transcodieren.
 - **Wöchentliche Aktualisierung:** Neuerungen der Grundlage werden übernommen, neue Texte übersetzt
   und als [Release](https://github.com/brunoz78/Wholphin-webOS/releases) mit fertigem `.ipk` veröffentlicht.
 
@@ -23,7 +25,8 @@ Für Android TV und Fire TV gibt es das [originale Wholphin](https://github.com/
 - Anmeldung mit Passwort oder Quick Connect, anpassbare Startseite
 - Mediatheken, Staffeln, Suche, Favoriten, Filter und Sortierung
 - Fortsetzen, Ton- und Untertitelwahl, Kapitel, Warteschlange, nächste Folge automatisch
-- SRT- und WebVTT-Untertitel direkt auf dem Fernseher, mit einstellbarer Darstellung und Timing
+- Untertitel direkt auf dem Fernseher: SRT, WebVTT, ASS/SSA und `mov_text` als Text mit einstellbarer
+  Darstellung, PGS als Bild; Timing für alle einstellbar. DVD-Untertitel brennt weiterhin der Server ein.
 - Live-TV mit Programmführer und Lieblingssendern
 - Bedienung mit Fernbedienung und Magic Remote, Bildschirmschoner
 
