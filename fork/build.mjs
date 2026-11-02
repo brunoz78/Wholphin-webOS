@@ -52,7 +52,7 @@ await fs.copyFile(path.join(fork, "assets/wholphin-large-icon.png"), path.join(o
 Object.assign(info, {
   id: APP_ID,
   title: "Wholphin",
-  vendor: "brunoz78 (Fork von Ember / Wholphin)",
+  vendor: "brunoz78",
   icon: "wholphin-icon.png",
   largeIcon: "wholphin-large-icon.png",
   iconColor: "#21172f",

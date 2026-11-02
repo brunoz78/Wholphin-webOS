@@ -1,21 +1,31 @@
-# Wholphin für LG webOS – deutsche Oberfläche
+# Wholphin für LG webOS
 
 <img src="../fork/assets/wholphin-large-icon.png" alt="Wholphin" width="96" align="right" />
 
-Inoffizieller Jellyfin-Client für LG-Fernseher mit webOS. Grundlage ist
-[Ember (JoeKer1/Wholphin-webOS)](https://github.com/JoeKer1/Wholphin-webOS), ein Nachbau von
-[Wholphin für Android TV](https://github.com/damontecres/Wholphin) für webOS, Tizen und Fire TV.
+**Deutsch** · [English](README.en.md)
 
-Dieser Fork ergänzt:
+Inoffizieller Jellyfin-Client für LG-Fernseher mit webOS, im Stil von
+[Wholphin für Android TV](https://github.com/damontecres/Wholphin).
+Grundlage ist der webOS-Nachbau [JoeKer1/Wholphin-webOS](https://github.com/JoeKer1/Wholphin-webOS).
 
-- **Deutsche Oberfläche** mit Sprachwahl Deutsch/Englisch unter *Einstellungen → Sprache*.
-  Die Übersetzung geschieht zur Laufzeit (`fork/i18n`), der Code des Originals bleibt unverändert.
-- **Name und Symbol Wholphin** statt Ember, eigene App-ID `ch.brunoz78.wholphin`,
-  so dass die App neben einer Original-Installation bestehen kann.
-- **Wöchentlicher Abgleich** mit dem Original: neue Texte werden übersetzt, das `.ipk` gebaut
-  und als [Release](https://github.com/brunoz78/Wholphin-webOS/releases) veröffentlicht.
+Dieser Fork bietet:
 
-Getestet wird auf einem LG OLED B1 (webOS 6).
+- **Deutsche Oberfläche** als Standard, Englisch umschaltbar unter *Einstellungen → Sprache*.
+- **Name und Symbol Wholphin**, eigene App-ID `ch.brunoz78.wholphin`.
+- **Wöchentliche Aktualisierung:** Neuerungen der Grundlage werden übernommen, neue Texte übersetzt
+  und als [Release](https://github.com/brunoz78/Wholphin-webOS/releases) mit fertigem `.ipk` veröffentlicht.
+
+Ausgerichtet auf LG webOS; getestet wird auf einem LG OLED B1 (webOS 6).
+Für Android TV und Fire TV gibt es das [originale Wholphin](https://github.com/damontecres/Wholphin).
+
+## Funktionen
+
+- Anmeldung mit Passwort oder Quick Connect, anpassbare Startseite
+- Mediatheken, Staffeln, Suche, Favoriten, Filter und Sortierung
+- Fortsetzen, Ton- und Untertitelwahl, Kapitel, Warteschlange, nächste Folge automatisch
+- SRT- und WebVTT-Untertitel direkt auf dem Fernseher, mit einstellbarer Darstellung und Timing
+- Live-TV mit Programmführer und Lieblingssendern
+- Bedienung mit Fernbedienung und Magic Remote, Bildschirmschoner
 
 ## Installieren
 
@@ -41,17 +51,19 @@ npm ci
 node fork/build.mjs --package   # dist/ch.brunoz78.wholphin_<version>_all.ipk
 ```
 
-Neue Texte des Originals prüfen und übersetzen:
+Übersetzung pflegen:
 
 ```sh
-node fork/i18n/extract.mjs              # fork/i18n/strings.json neu erzeugen
+node fork/i18n/extract.mjs              # Texte der App sammeln (fork/i18n/strings.json)
 node fork/i18n/extract.mjs --missing    # Texte ohne Übersetzung auflisten
 node fork/i18n/translate.mjs            # mit ANTHROPIC_API_KEY automatisch übersetzen
 ```
 
+Alle Anpassungen liegen in `fork/` und werden erst beim Bauen eingefügt; der übrige Code
+entspricht der Grundlage.
+
 ## Lizenz
 
-GPL-2.0 wie das Original. Wholphin-Name und -Symbol stammen von
-[damontecres/Wholphin](https://github.com/damontecres/Wholphin), die App-Grundlage von
-[JoeKer1/Wholphin-webOS](https://github.com/JoeKer1/Wholphin-webOS). Kein offizielles Produkt von
-Wholphin, Jellyfin oder LG.
+GPL-2.0. Name und Symbol Wholphin stammen von [damontecres/Wholphin](https://github.com/damontecres/Wholphin),
+die webOS-Umsetzung von [JoeKer1/Wholphin-webOS](https://github.com/JoeKer1/Wholphin-webOS).
+Kein offizielles Produkt von Wholphin, Jellyfin oder LG.

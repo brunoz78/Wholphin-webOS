@@ -1,4 +1,4 @@
-# Fork addition: weekly merge of JoeKer1/Wholphin-webOS (Ember), German translation of new
+# Fork addition: weekly merge of JoeKer1/Wholphin-webOS, German translation of new
 # texts, build of the LG webOS package and release.
 name: Fork sync and release
 
@@ -144,7 +144,7 @@ jobs:
           (cd dist && sha256sum "$(basename "$IPK")" > "$(basename "$IPK").sha256")
           SINCE=${LAST:+^$LAST}
           {
-            echo "Wholphin für LG webOS mit deutscher Oberfläche, Stand Ember $VERSION (JoeKer1/Wholphin-webOS)."
+            echo "Wholphin für LG webOS mit deutscher Oberfläche, Version $VERSION (Grundlage JoeKer1/Wholphin-webOS)."
             echo
             echo "**Installieren/aktualisieren:** \`.ipk\` herunterladen und mit dem webOS Dev Manager oder \`ares-install --device <tv> $(basename "$IPK")\` auf den Fernseher laden. Anmeldung und Einstellungen bleiben erhalten."
             if [ -n "$LAST" ]; then
