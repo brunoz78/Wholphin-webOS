@@ -61,13 +61,13 @@ async function patch(file, from, to, why) {
   if (!code.includes(from)) throw new Error(`Patch "${why}" no longer fits ${file}`);
   await fs.writeFile(p, code.replace(from, to));
 }
-// ASS/SSA as text on the TV: Jellyfin converts them to WebVTT (Stream.vtt), so they no longer
-// need burn-in and transcoding. Styling of ASS (fonts, positions, effects) is not kept.
+// Subtitle defaults for German speakers: the original picks English subtitles for every
+// non-English audio track by default, which would add English subtitles to German audio.
 await patch(
-  "core.js",
-  '["srt", "subrip", "vtt", "webvtt"].indexOf(',
-  '["srt", "subrip", "vtt", "webvtt", "ass", "ssa", "mov_text"].indexOf(',
-  "ASS/SSA as text",
+  "app.js",
+  '{mode: "remember", language: "eng", foreignEnglish: true}',
+  '{mode: "remember", language: "deu", foreignEnglish: false}',
+  "German subtitle defaults",
 );
 
 // App entry on the TV: own ID, so it installs next to the original.

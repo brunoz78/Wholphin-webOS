@@ -20,9 +20,20 @@
     var codec = String((track && track.Codec) || "").toLowerCase();
     return track && track.Type === "Subtitle" && (codec === "pgssub" || codec === "pgs");
   }
+  // Text formats Jellyfin converts to WebVTT (Stream.vtt) besides the ones the original accepts.
+  var TEXT = { ass: 1, ssa: 1, mov_text: 1 };
   var textSubtitle = C.textSubtitle;
   C.textSubtitle = function (source, index) {
     var track = textSubtitle(source, index);
+    if (track) return track;
+    track = ((source && source.MediaStreams) || []).find(function (t) {
+      return (
+        t.Index === index &&
+        t.Type === "Subtitle" &&
+        TEXT[String(t.Codec || "").toLowerCase()] &&
+        t.IsTextSubtitleStream !== false
+      );
+    });
     if (track) return track;
     track = ((source && source.MediaStreams) || []).find(function (t) {
       return t.Index === index && isPgs(t);
