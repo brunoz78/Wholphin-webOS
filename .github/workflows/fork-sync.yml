@@ -106,7 +106,12 @@ jobs:
           git diff --cached --quiet || git commit -q -m "Übersetzung: neue Texte ergänzt"
 
       - name: Build package
-        run: node fork/build.mjs --package
+        id: build
+        run: |
+          # The release name is decided here so the app can show it in the playback information.
+          TAG="v$(node -p "require('./package.json').version").post$(date -u +%Y%m%d%H%M)"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          FORK_RELEASE="$TAG" node fork/build.mjs --package
 
       - name: Push
         env:
@@ -140,7 +145,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          TAG="v${VERSION}.post$(date -u +%Y%m%d%H%M)"
+          TAG="${{ steps.build.outputs.tag }}"
           IPK=$(ls dist/*.ipk)
           (cd dist && sha256sum "$(basename "$IPK")" > "$(basename "$IPK").sha256")
           # Only the newest release of each version is kept. The notes therefore cover everything

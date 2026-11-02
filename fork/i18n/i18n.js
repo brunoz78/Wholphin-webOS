@@ -119,10 +119,11 @@
         });
         break;
       }
-    // Lines joined with " · " ("Embedded · No burn-in", "· Ends at 16:45"): translate each part.
-    if (out == null && depth < 2 && /(^|\s)·\s/.test(key)) {
+    // Lines joined with " · " or "; " ("Embedded · No burn-in", "· Ends at 16:45",
+    // "Container needs conversion; Video codec is unsupported"): translate each part.
+    if (out == null && depth < 2 && /(^|\s)·\s|;\s/.test(key)) {
       var changed = false,
-        parts = key.split(/((?:^|\s)·\s)/).map(function (part, i) {
+        parts = key.split(/((?:^|\s)·\s|;\s)/).map(function (part, i) {
           if (i % 2 || !part) return part;
           var t = translate(part, depth + 1);
           if (t != null && t !== part) changed = true;

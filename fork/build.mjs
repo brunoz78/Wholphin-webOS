@@ -28,14 +28,22 @@ const de = JSON.parse(await fs.readFile(path.join(fork, "i18n/de.json"), "utf8")
   en = { strings: {}, rules: [["Ember for Jellyfin · v([\\d.]+)", "Wholphin for Jellyfin · v$1"]] };
 for (const k of Object.keys(strings))
   if (/\bEmber\b/.test(k) && !/ · v\d/.test(k)) en.strings[k] = k.replace(/\bEmber\b/g, "Wholphin");
+// Release name shown in the playback information: the workflow passes the release tag,
+// a local build is marked as such.
+const version = JSON.parse(await fs.readFile(path.join(root, "package.json"), "utf8")).version,
+  stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 12),
+  release = process.env.FORK_RELEASE || `v${version}.local${stamp}`;
 await fs.writeFile(
   path.join(out, "i18n-data.js"),
-  "window.WHOLPHIN_I18N = " + JSON.stringify({ de: { strings: de.strings, rules: de.rules }, en }) + ";\n",
+  "window.WHOLPHIN_I18N = " + JSON.stringify({ de: { strings: de.strings, rules: de.rules }, en }) + ";\n" +
+    "window.WHOLPHIN_RELEASE = " + JSON.stringify(release) + ";\n",
 );
 await fs.copyFile(path.join(fork, "i18n/i18n.js"), path.join(out, "i18n.js"));
 await fs.copyFile(path.join(fork, "subtitles/pgs.js"), path.join(out, "pgs.js"));
 await fs.copyFile(path.join(fork, "playback/codecs.js"), path.join(out, "codecs.js"));
+await fs.copyFile(path.join(fork, "playback/stats.js"), path.join(out, "stats.js"));
 await fs.copyFile(path.join(fork, "login.js"), path.join(out, "login.js"));
+await fs.copyFile(path.join(fork, "style.css"), path.join(out, "fork.css"));
 
 // Page: load the translation before the app, show the Wholphin name.
 let html = await fs.readFile(path.join(out, "index.html"), "utf8");
@@ -47,8 +55,10 @@ html = html
   // PGS subtitles and AV1 hook into WholphinCore, so they load after core.js and before app.js.
   .replace(
     appHook,
-    '<script src="pgs.js"></script>\n    <script src="codecs.js"></script>\n    <script src="login.js"></script>\n    ' + appHook,
+    '<script src="pgs.js"></script>\n    <script src="codecs.js"></script>\n    <script src="login.js"></script>\n    ' + appHook +
+      '\n    <script src="stats.js"></script>',
   )
+  .replace('<link rel="stylesheet" href="style.css" />', '<link rel="stylesheet" href="style.css" /><link rel="stylesheet" href="fork.css" />')
   .replace(/<title>[^<]*<\/title>/, "<title>Wholphin</title>")
   .replace("<strong>Ember</strong>", "<strong>Wholphin</strong>");
 await fs.writeFile(path.join(out, "index.html"), html);
@@ -69,6 +79,14 @@ await patch(
   '{mode: "remember", language: "eng", foreignEnglish: true}',
   '{mode: "off", language: "deu", foreignEnglish: false}',
   "Subtitle defaults",
+);
+
+// Direct play also with an applied track choice, see WholphinNeedsRemux in playback/codecs.js.
+await patch(
+  "app.js",
+  "(!!options.trackChange || !!subtitleCues || !!options.applyPreferences)",
+  "(!!options.trackChange || !!(window.WholphinNeedsRemux ? window.WholphinNeedsRemux(options, sourceMetadata) : (subtitleCues || options.applyPreferences)))",
+  "Direct play with track choice",
 );
 
 // App entry on the TV: own ID, so it installs next to the original.
