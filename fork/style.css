@@ -33,6 +33,23 @@
   font-size: 20px;
 }
 
+/* Check mark on watched episodes, left of the episode number. */
+.fork-watched {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #7c4dff;
+  color: #fff;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 34px;
+  text-align: center;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+
 /* Live playback overlay (key 0 during playback). */
 #fork-stats {
   position: absolute;

@@ -89,6 +89,58 @@ await patch(
   "Direct play with track choice",
 );
 
+// Native playback is the default on LG (the original starts in Compatibility: H.264, at most 1080p).
+await patch(
+  "app.js",
+  "native: !!P.playbackPolicy,",
+  "native: true,",
+  "Native playback by default",
+);
+// Watched episodes get a check mark on their card (the original only shows progress bars).
+await patch(
+  "app.js",
+  'el("span", "E" + item.IndexNumber, art).className = "episode-badge";',
+  'el("span", "E" + item.IndexNumber, art).className = "episode-badge";\n' +
+    '        if (item.UserData && item.UserData.Played) el("span", "\\u2713", art).className = "fork-watched";',
+  "Watched check mark",
+);
+
+// An episode chosen on Home (Continue watching, Next up …) opens the season view with the
+// episode focused, instead of the episode's own detail page. Inside the season view nothing changes.
+await patch(
+  "app.js",
+  "return detail(item.Id, !!item.IsLiveProgram);",
+  "return item.Type === \"Episode\" && item.SeasonId && item.SeriesId && !item.IsLiveProgram &&\n" +
+    "              !main.classList.contains(\"season-browser\")\n" +
+    "              ? forkEpisodeSeason(item)\n" +
+    "              : detail(item.Id, !!item.IsLiveProgram);",
+  "Episode opens season view",
+);
+await patch(
+  "app.js",
+  "  async function seasonsPage(seriesId) {",
+  "  async function forkEpisodeSeason(item) {\n" +
+    "    var seasons;\n" +
+    "    try {\n" +
+    "      seasons = await seasonChoices(item.SeriesId);\n" +
+    "    } catch (_) {\n" +
+    "      return detail(item.Id);\n" +
+    "    }\n" +
+    "    var season = seasons.find(function (s) { return s.Id === item.SeasonId; });\n" +
+    "    if (!season) return detail(item.Id);\n" +
+    "    // seasonBrowser focuses the card whose id the current navigation frame remembers.\n" +
+    "    var frame = stack[stack.length - 1];\n" +
+    "    if (frame && !frame.focus) frame.focus = item.Id;\n" +
+    "    return seasonBrowser(season.Id, (item.SeriesName || \"\") + \" · \" + season.Name, {\n" +
+    "      seriesId: item.SeriesId,\n" +
+    "      title: item.SeriesName,\n" +
+    "      seasons: seasons,\n" +
+    "    });\n" +
+    "  }\n" +
+    "  async function seasonsPage(seriesId) {",
+  "Episode opens season view (helper)",
+);
+
 // App entry on the TV: own ID, so it installs next to the original.
 const info = JSON.parse(await fs.readFile(path.join(out, "appinfo.json"), "utf8"));
 for (const f of [info.icon, info.largeIcon]) await fs.rm(path.join(out, f), { force: true });
