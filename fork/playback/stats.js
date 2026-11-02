@@ -1,12 +1,14 @@
-/* Fork addition: live playback overlay for testing, toggled in the player's Options menu
-   ("Live info" next to "Playback info") or with the blue key; the choice is remembered. Shows how the server delivers the video (direct, remux, transcode), codecs in and out,
+/* Fork addition: live playback overlay for testing, toggled with key 0 or in the player's Options
+   menu ("Live info" next to "Playback info"); the choice is remembered.
+   Also: the rows of the playback information are no longer focusable one by one, since the
+   compact panel (style.css) shows everything without scrolling. Shows how the server delivers the video (direct, remux, transcode), codecs in and out,
    resolution, bit rate and the server's reasons, refreshed every few seconds from /Sessions.
    Independent of the app's code: reads the session and device id the app stores.
    Written for Chromium 79 (webOS 6). */
 (function () {
   "use strict";
   var KEY = "wholphin-fork-stats",
-    TOGGLE_KEYS = { 406: 1 }; // blue (the LG Magic Remote of 2021 has no number or color keys)
+    TOGGLE_KEYS = { 48: 1, 96: 1, 406: 1 }; // 0, numpad 0, blue
 
   var de = !window.wholphinI18n || window.wholphinI18n.lang !== "en";
   function t(en, german) {
@@ -231,6 +233,24 @@
     },
     true,
   );
+  // Playback information: rows are plain text, focus goes to the first button below them.
+  function plainRows() {
+    var panel = document.getElementById("playback-panel");
+    if (!panel || panel.hidden || panel.dataset.kind !== "info") return;
+    var rows = panel.querySelectorAll(".playback-info-row[tabindex]");
+    if (!rows.length) return;
+    for (var i = 0; i < rows.length; i++) rows[i].removeAttribute("tabindex");
+    // The app then tries to focus the first row, which no longer takes focus.
+    setTimeout(function () {
+      var active = document.activeElement;
+      if (active && panel.contains(active) && !active.classList.contains("menu-close") && active.tagName === "BUTTON") return;
+      var next = panel.querySelector(".playback-info ~ p ~ button, .playback-info ~ button");
+      if (next) next.focus();
+    }, 0);
+  }
+  var panel = document.getElementById("playback-panel");
+  if (panel) new MutationObserver(plainRows).observe(panel, { childList: true, subtree: true });
+
   mountButton();
   schedule();
 })();
