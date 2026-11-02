@@ -61,13 +61,14 @@ async function patch(file, from, to, why) {
   if (!code.includes(from)) throw new Error(`Patch "${why}" no longer fits ${file}`);
   await fs.writeFile(p, code.replace(from, to));
 }
-// Subtitle defaults for German speakers: the original picks English subtitles for every
-// non-English audio track by default, which would add English subtitles to German audio.
+// Subtitle defaults of the fork: off unless chosen (the original remembers the last choice and
+// picks English subtitles for every non-English audio track, i.e. also for German audio).
+// "Preferred language" is German when switched on in Settings.
 await patch(
   "app.js",
   '{mode: "remember", language: "eng", foreignEnglish: true}',
-  '{mode: "remember", language: "deu", foreignEnglish: false}',
-  "German subtitle defaults",
+  '{mode: "off", language: "deu", foreignEnglish: false}',
+  "Subtitle defaults",
 );
 
 // App entry on the TV: own ID, so it installs next to the original.
