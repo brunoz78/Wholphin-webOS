@@ -143,7 +143,11 @@ jobs:
           TAG="v${VERSION}.post$(date -u +%Y%m%d%H%M)"
           IPK=$(ls dist/*.ipk)
           (cd dist && sha256sum "$(basename "$IPK")" > "$(basename "$IPK").sha256")
-          SINCE=${LAST:+^$LAST}
+          # Only the newest release of each version is kept. The notes therefore cover everything
+          # since the release of the previous version, and older releases of this version go away.
+          PREV=$(git tag --list 'v*.post*' --sort=-creatordate | grep -v "^v${VERSION}\.post" | head -1)
+          SINCE=${PREV:+^$PREV}
+          LAST=$PREV
           # Commit titles of the original are English; they are translated when the API key is set.
           ORIGINAL=""
           if [ -n "$LAST" ]; then
@@ -168,3 +172,7 @@ jobs:
           git tag "$TAG"
           git push origin "$TAG"
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" dist/*.ipk dist/*.sha256 --title "Wholphin $TAG" --notes-file notes.md
+          for OLD in $(git tag --list "v${VERSION}.post*"); do
+            [ "$OLD" = "$TAG" ] && continue
+            gh release delete "$OLD" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || git push origin ":refs/tags/$OLD" || true
+          done
