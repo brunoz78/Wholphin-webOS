@@ -71,8 +71,10 @@
     VideoRangeTypeNotSupported: t("HDR format", "HDR-Format"),
     VideoResolutionNotSupported: t("resolution", "Auflösung"),
     AudioChannelsNotSupported: t("audio channels", "Tonkanäle"),
-    DirectPlayError: t("direct play off in app", "Direktwiedergabe in der App aus"),
+    DirectPlayError: t("track change during playback", "Spurwechsel während der Wiedergabe"),
   };
+  // Reasons that only describe a copy (nothing is converted) are no warning.
+  var HARMLESS = { DirectPlayError: 1, ContainerNotSupported: 1 };
 
   function row(label, value, warn) {
     return (
@@ -152,7 +154,9 @@
         ti.TranscodeReasons.map(function (r) {
           return REASONS[r] || r;
         }).join(", "),
-        true,
+        !ti.TranscodeReasons.every(function (r) {
+          return HARMLESS[r];
+        }),
       );
     if (ti && ti.Framerate) html += row(t("Server speed", "Server-Tempo"), ti.Framerate.toFixed(0) + " fps");
     if (window.WHOLPHIN_RELEASE) html += row("Release", window.WHOLPHIN_RELEASE);
@@ -223,13 +227,34 @@
     info.parentNode.insertBefore(toggleButton, info.nextSibling);
   }
 
+  // Key 1 (or an Info key) opens the playback information, pressed again closes it.
+  var INFO_KEYS = { 49: 1, 97: 1, 457: 1 };
+  function toggleInfo() {
+    var panel = document.getElementById("playback-panel");
+    if (panel && !panel.hidden && panel.dataset.kind === "info") {
+      var close = panel.querySelector(".menu-close");
+      if (close) close.click();
+      return;
+    }
+    var open = document.getElementById("playback-info");
+    if (open) open.click();
+  }
+
   document.addEventListener(
     "keydown",
     function (e) {
-      if (!TOGGLE_KEYS[e.keyCode] || !playing()) return;
-      e.preventDefault();
-      e.stopPropagation();
-      toggle();
+      if (!playing()) return;
+      if (TOGGLE_KEYS[e.keyCode]) {
+        e.preventDefault();
+        e.stopPropagation();
+        toggle();
+      } else if (INFO_KEYS[e.keyCode]) {
+        var target = e.target;
+        if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+        e.preventDefault();
+        e.stopPropagation();
+        toggleInfo();
+      }
     },
     true,
   );

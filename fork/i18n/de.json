@@ -341,7 +341,7 @@
   "Movie": "Film",
   "Movies": "Filme",
   "Moving clock": "Wandernde Uhr",
-  "Native playback failed": "Native Wiedergabe fehlgeschlagen",
+  "Native playback failed": "Direktwiedergabe von der App abgeschaltet (z. B. Spurwechsel während der Wiedergabe)",
   "Native playback failed. Trying Compatibility at the same position…": "Native Wiedergabe fehlgeschlagen. Versuche es im Kompatibilitätsmodus an derselben Stelle …",
   "Next": "Weiter",
   "Next Up": "Als Nächstes",
