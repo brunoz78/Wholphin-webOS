@@ -64,5 +64,23 @@
     return result;
   };
 
+  // The original switches every Dolby Vision video to Compatibility (H.264, at most 1080p) unless
+  // the experimental "Dolby Vision MP4" option is on. Most 4K files carry Dolby Vision on top of an
+  // HDR10 or SDR base layer, which the TV plays natively, so those stay in native mode.
+  var BASE_LAYER = { DOVIWithHDR10: 1, DOVIWithHDR10Plus: 1, DOVIWithSDR: 1, DOVIWithHLG: 1 };
+  var nativePolicy = C.nativePolicy;
+  C.nativePolicy = function (source, options, subtitleIndex) {
+    var result = nativePolicy(source, options, subtitleIndex);
+    if (result.native || !options || !options.native) return result;
+    var stream = ((source && source.MediaStreams) || []).find(function (entry) {
+      return entry.Type === "Video";
+    });
+    if (!stream || !BASE_LAYER[stream.VideoRangeType]) return result;
+    if (subtitleIndex != null && subtitleIndex >= 0) return result; // burn-in still needs Compatibility
+    var codec = String(stream.Codec || "").toLowerCase();
+    if (codec !== "hevc" && !(codec === "av1" && av1)) return result;
+    return { native: true, reason: "Dolby Vision played as its base layer" };
+  };
+
   window.WholphinCodecs = { av1: av1 };
 })();
