@@ -12,6 +12,9 @@ This fork provides:
 
 - **German interface** by default, English selectable under *Settings → Language*.
 - **Wholphin name and icon**, own app ID `ch.brunoz78.wholphin`.
+- **AV1 in hardware** in the native playback mode (*Settings → Device → Playback mode*):
+  AV1 up to 4K 60p 10 bit including HDR is no longer converted to H.264 when the TV reports AV1 support
+  (LG from 2021, e.g. B1/C1).
 - **More subtitles without burn-in:** PGS (Blu-ray) is drawn by the TV itself,
   ASS/SSA and `mov_text` are shown as text. The server no longer has to transcode for them.
 - **Weekly updates:** changes of the base project are merged, new texts translated and published as a

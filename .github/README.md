@@ -12,6 +12,9 @@ Dieser Fork bietet:
 
 - **Deutsche Oberfläche** als Standard, Englisch umschaltbar unter *Einstellungen → Sprache*.
 - **Name und Symbol Wholphin**, eigene App-ID `ch.brunoz78.wholphin`.
+- **AV1 in Hardware** im nativen Wiedergabemodus (*Einstellungen → Gerät → Wiedergabemodus*):
+  AV1 bis 4K 60p 10 Bit samt HDR wird nicht mehr in H.264 umgewandelt, sofern der Fernseher AV1 meldet
+  (LG ab 2021, z. B. B1/C1).
 - **Mehr Untertitel ohne Einbrennen:** PGS (Blu-ray) zeichnet der Fernseher selbst,
   ASS/SSA und `mov_text` erscheinen als Text. Der Server muss dafür nicht mehr transcodieren.
 - **Wöchentliche Aktualisierung:** Neuerungen der Grundlage werden übernommen, neue Texte übersetzt
