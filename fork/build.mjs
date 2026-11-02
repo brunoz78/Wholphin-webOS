@@ -43,6 +43,7 @@ await fs.copyFile(path.join(fork, "subtitles/pgs.js"), path.join(out, "pgs.js"))
 await fs.copyFile(path.join(fork, "playback/codecs.js"), path.join(out, "codecs.js"));
 await fs.copyFile(path.join(fork, "playback/stats.js"), path.join(out, "stats.js"));
 await fs.copyFile(path.join(fork, "login.js"), path.join(out, "login.js"));
+await fs.copyFile(path.join(fork, "nav.js"), path.join(out, "nav.js"));
 await fs.copyFile(path.join(fork, "style.css"), path.join(out, "fork.css"));
 
 // Page: load the translation before the app, show the Wholphin name.
@@ -56,7 +57,7 @@ html = html
   .replace(
     appHook,
     '<script src="pgs.js"></script>\n    <script src="codecs.js"></script>\n    <script src="login.js"></script>\n    ' + appHook +
-      '\n    <script src="stats.js"></script>',
+      '\n    <script src="stats.js"></script>\n    <script src="nav.js"></script>',
   )
   .replace('<link rel="stylesheet" href="style.css" />', '<link rel="stylesheet" href="style.css" /><link rel="stylesheet" href="fork.css" />')
   .replace(/<title>[^<]*<\/title>/, "<title>Wholphin</title>")
