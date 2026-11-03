@@ -46,6 +46,7 @@ await fs.copyFile(path.join(fork, "login.js"), path.join(out, "login.js"));
 await fs.copyFile(path.join(fork, "nav.js"), path.join(out, "nav.js"));
 await fs.copyFile(path.join(fork, "extras.js"), path.join(out, "extras.js"));
 await fs.copyFile(path.join(fork, "playback/segments.js"), path.join(out, "segments.js"));
+await fs.copyFile(path.join(fork, "playback/theme.js"), path.join(out, "theme.js"));
 await fs.copyFile(path.join(fork, "style.css"), path.join(out, "fork.css"));
 
 // Page: load the translation before the app, show the Wholphin name.
@@ -60,6 +61,11 @@ html = html
     appHook,
     '<script src="pgs.js"></script>\n    <script src="codecs.js"></script>\n    <script src="login.js"></script>\n    ' + appHook +
       '\n    <script src="stats.js"></script>\n    <script src="nav.js"></script>\n    <script src="extras.js"></script>\n    <script src="segments.js"></script>',
+  )
+  // Theme music must exist before the app opens its first page.
+  .replace(
+    appHook,
+    '<script src="theme.js"></script>\n    ' + appHook,
   )
   .replace('<link rel="stylesheet" href="style.css" />', '<link rel="stylesheet" href="style.css" /><link rel="stylesheet" href="fork.css" />')
   .replace(/<title>[^<]*<\/title>/, "<title>Wholphin</title>")
@@ -99,27 +105,14 @@ await patch(
   "native: true,",
   "Native playback by default",
 );
-// Watched episodes get a check mark on their card (the original only shows progress bars).
-await patch(
-  "app.js",
-  'el("span", "E" + item.IndexNumber, art).className = "episode-badge";',
-  'el("span", "E" + item.IndexNumber, art).className = "episode-badge";\n' +
-    '        if (item.UserData && item.UserData.Played) el("span", "\\u2713", art).className = "fork-watched";',
-  "Watched check mark",
-);
+// Watched check marks and episodes opening in the season view come from the original since 0.2.82.
 
-// An episode chosen on Home (Continue watching, Next up …) opens the season view with the
-// episode focused, instead of the episode's own detail page. Inside the season view nothing changes.
+// A playlist opens its items directly instead of its detail page.
 await patch(
   "app.js",
   "return detail(item.Id, !!item.IsLiveProgram);",
-  "return item.Type === \"Playlist\"\n" +
-    "              ? forkPlaylist(item)\n" +
-    "              : item.Type === \"Episode\" && item.SeasonId && item.SeriesId && !item.IsLiveProgram &&\n" +
-    "              !main.classList.contains(\"season-browser\")\n" +
-    "              ? forkEpisodeSeason(item)\n" +
-    "              : detail(item.Id, !!item.IsLiveProgram);",
-  "Episode opens season view, playlist opens its items",
+  "return item.Type === \"Playlist\" ? forkPlaylist(item) : detail(item.Id, !!item.IsLiveProgram);",
+  "Playlist opens its items",
 );
 // A playlist opens its items directly (no detail page and "Browse" step), loaded at once.
 // Episodes are shown as their series, once, in playlist order: watchlists synced from Plex
@@ -170,29 +163,20 @@ await patch(
     "  async function seasonsPage(seriesId) {",
   "Playlist page",
 );
+// Theme music (fork/playback/theme.js): detail pages and the season view report their item.
 await patch(
   "app.js",
-  "  async function seasonsPage(seriesId) {",
-  "  async function forkEpisodeSeason(item) {\n" +
-    "    var seasons;\n" +
-    "    try {\n" +
-    "      seasons = await seasonChoices(item.SeriesId);\n" +
-    "    } catch (_) {\n" +
-    "      return detail(item.Id);\n" +
-    "    }\n" +
-    "    var season = seasons.find(function (s) { return s.Id === item.SeasonId; });\n" +
-    "    if (!season) return detail(item.Id);\n" +
-    "    // seasonBrowser focuses the card whose id the current navigation frame remembers.\n" +
-    "    var frame = stack[stack.length - 1];\n" +
-    "    if (frame && !frame.focus) frame.focus = item.Id;\n" +
-    "    return seasonBrowser(season.Id, (item.SeriesName || \"\") + \" · \" + season.Name, {\n" +
-    "      seriesId: item.SeriesId,\n" +
-    "      title: item.SeriesName,\n" +
-    "      seasons: seasons,\n" +
-    "    });\n" +
-    "  }\n" +
-    "  async function seasonsPage(seriesId) {",
-  "Episode opens season view (helper)",
+  "    if (liveProgram) item.IsLiveProgram = true;",
+  "    if (liveProgram) item.IsLiveProgram = true;\n" +
+    "    else if (window.WholphinTheme) window.WholphinTheme(item);",
+  "Theme music on detail pages",
+);
+await patch(
+  "app.js",
+  '    main.className = "detail-page season-browser";',
+  '    main.className = "detail-page season-browser";\n' +
+    '    if (window.WholphinTheme) window.WholphinTheme({ Id: context.seriesId, Type: "Series" });',
+  "Theme music in the season view",
 );
 
 // Rewind on resume (fork/extras.js): resuming starts a few seconds before the saved position.
