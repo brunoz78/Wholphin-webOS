@@ -162,6 +162,16 @@
   color: #a9a3b3;
 }
 
+/* "More" for shortened descriptions (fork/overview.js): the text opens in full. */
+.overview.fork-overview-open {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+.fork-more-actions {
+  margin: 8px 0 24px;
+}
+
 /* "Exit Wholphin?" dialog (fork/exit.js). */
 #fork-exit {
   position: fixed;

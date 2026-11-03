@@ -46,6 +46,7 @@ await fs.copyFile(path.join(fork, "login.js"), path.join(out, "login.js"));
 await fs.copyFile(path.join(fork, "nav.js"), path.join(out, "nav.js"));
 await fs.copyFile(path.join(fork, "extras.js"), path.join(out, "extras.js"));
 await fs.copyFile(path.join(fork, "exit.js"), path.join(out, "exit.js"));
+await fs.copyFile(path.join(fork, "overview.js"), path.join(out, "overview.js"));
 await fs.copyFile(path.join(fork, "playback/theme.js"), path.join(out, "theme.js"));
 await fs.copyFile(path.join(fork, "style.css"), path.join(out, "fork.css"));
 
@@ -60,7 +61,7 @@ html = html
   .replace(
     appHook,
     '<script src="pgs.js"></script>\n    <script src="codecs.js"></script>\n    <script src="login.js"></script>\n    ' + appHook +
-      '\n    <script src="stats.js"></script>\n    <script src="nav.js"></script>\n    <script src="extras.js"></script>\n    <script src="exit.js"></script>',
+      '\n    <script src="stats.js"></script>\n    <script src="nav.js"></script>\n    <script src="extras.js"></script>\n    <script src="exit.js"></script>\n    <script src="overview.js"></script>',
   )
   // Theme music must exist before the app opens its first page.
   .replace(

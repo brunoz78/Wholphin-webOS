@@ -810,6 +810,8 @@
   "1 movie": "1 Film",
   "{0} movies": "{0} Filme",
   "Born {0}": "Geboren am {0}",
-  "In your library ({0})": "In deiner Mediathek ({0})"
+  "In your library ({0})": "In deiner Mediathek ({0})",
+  "More": "Mehr",
+  "Less": "Weniger"
  }
 }
