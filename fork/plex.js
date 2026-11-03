@@ -1,7 +1,7 @@
 /* Fork addition: Plex account for titles outside the library, as in Plex.
    Jellyfin can only store titles of the library. Signed in with Plex (Settings → Movie data,
    code on plex.tv/link, no password on the TV), the TMDB information page of a missing title
-   adds it to the Plex watchlist or marks it watched in Plex; CrossWatch carries both to Jellyfin
+   adds it to the Plex watchlist or marks it watched in Plex; a Plex-Jellyfin sync carries both to Jellyfin
    once the title is in the library. The watchlist page also shows the Plex titles not yet in the
    library. Token and device number are stored on this TV only.
    Written for Chromium 79 (webOS 6). */

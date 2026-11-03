@@ -118,7 +118,7 @@ await patch(
   "Playlist and collection open their items",
 );
 // A playlist opens its items directly (no detail page and "Browse" step), loaded at once,
-// in playlist order: watchlists synced from Plex (e.g. by CrossWatch) list the newest first.
+// in playlist order: watchlists synced from Plex list the newest first.
 // Episodes are shown as their series, once: such watchlists list every single episode.
 // The playlist "Watchlist" and the playlists library are called "Merkliste", as in Plex, and
 // the library opens its only playlist directly.
