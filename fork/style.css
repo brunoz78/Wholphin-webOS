@@ -290,6 +290,26 @@
   text-align: center;
 }
 
+/* Plex: sign-in code, watchlist and watched buttons, missing titles (fork/plex.js). */
+.fork-plex-code {
+  margin: 16px 0 28px;
+  font-size: 64px;
+  font-weight: 700;
+  letter-spacing: 12px;
+  color: #f5a623;
+}
+.fork-plex-watchlist.is-on,
+.fork-plex-watched.is-on {
+  background: rgba(245, 166, 35, 0.22);
+}
+.fork-not-owned {
+  color: #f5a623;
+}
+.fork-plex-missing {
+  clear: both;
+  margin-top: 32px;
+}
+
 /* Checkboxes (e.g. "Customize Home"): the TV draws native checkboxes without a check mark,
    so every box looked empty. Drawn here: violet with a white check when on. */
 #main input[type="checkbox"] {

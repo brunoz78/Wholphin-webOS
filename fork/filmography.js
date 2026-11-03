@@ -214,15 +214,36 @@
         if (item.genres && item.genres.length)
           el("p", "genres", item.genres.map(function (g) { return g.name; }).join(", "), box);
         if (item.overview) el("p", "overview", item.overview, box);
-        var note = el("div", "actions", null, box),
-          missing = el("button", "fork-not-owned", t("Not in your library", "Nicht in deiner Mediathek"), note);
-        missing.focus();
+        el("p", "metadata fork-not-owned", t("Not in your library", "Nicht in deiner Mediathek"), box);
+        // Watchlist and watched in Plex (fork/plex.js); without it a plain note.
+        var row = el("div", "actions", null, box);
+        if (window.WholphinPlexActions) window.WholphinPlexActions(row, credit, true);
       },
       function () {
         if (valid()) status.textContent = t("TMDB could not be reached.", "TMDB ist nicht erreichbar.");
       },
     );
   }
+
+  // Shared with fork/plex.js: library index, TMDB posters and the information page.
+  window.WholphinLibraryIndex = libraryIndex;
+  window.WholphinTmdbPoster = function (credit) {
+    if (!tmdbKey()) return Promise.resolve(null);
+    return tmdb("/" + credit.media_type + "/" + encodeURIComponent(credit.id)).then(
+      function (item) {
+        return item.poster_path ? IMAGES + "w342" + item.poster_path : null;
+      },
+      function () {
+        return null;
+      },
+    );
+  };
+  window.WholphinTmdbInfo = function (credit) {
+    if (!window.WholphinPage) return;
+    window.WholphinPage(credit.title || credit.name || "", function (page, valid) {
+      return infoPage(page, valid, credit);
+    });
+  };
 
   // ---- setting: TMDB key -------------------------------------------------------------------
   function openKeyDialog(row, render) {

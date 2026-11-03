@@ -48,6 +48,7 @@ await fs.copyFile(path.join(fork, "extras.js"), path.join(out, "extras.js"));
 await fs.copyFile(path.join(fork, "exit.js"), path.join(out, "exit.js"));
 await fs.copyFile(path.join(fork, "overview.js"), path.join(out, "overview.js"));
 await fs.copyFile(path.join(fork, "filmography.js"), path.join(out, "filmography.js"));
+await fs.copyFile(path.join(fork, "plex.js"), path.join(out, "plex.js"));
 await fs.copyFile(path.join(fork, "playback/theme.js"), path.join(out, "theme.js"));
 await fs.copyFile(path.join(fork, "style.css"), path.join(out, "fork.css"));
 
@@ -62,7 +63,7 @@ html = html
   .replace(
     appHook,
     '<script src="pgs.js"></script>\n    <script src="codecs.js"></script>\n    <script src="login.js"></script>\n    ' + appHook +
-      '\n    <script src="stats.js"></script>\n    <script src="nav.js"></script>\n    <script src="extras.js"></script>\n    <script src="exit.js"></script>\n    <script src="overview.js"></script>\n    <script src="filmography.js"></script>',
+      '\n    <script src="stats.js"></script>\n    <script src="nav.js"></script>\n    <script src="extras.js"></script>\n    <script src="exit.js"></script>\n    <script src="overview.js"></script>\n    <script src="filmography.js"></script>\n    <script src="plex.js"></script>',
   )
   // Theme music must exist before the app opens its first page.
   .replace(
@@ -165,14 +166,32 @@ await patch(
     "      return entry.seriesId ? series[entry.seriesId] || entry.episode : entry;\n" +
     "    });\n" +
     "    info.textContent = items.length + \" items loaded\";\n" +
-    "    if (!items.length) { el(\"p\", \"No items found.\", main); return; }\n" +
-    "    var grid = cards(items, main);\n" +
-    "    var restoreFrame = stack[stack.length - 1];\n" +
-    "    var restore = Array.prototype.find.call(grid.children, function (card) {\n" +
-    "      return restoreFrame && card.dataset.item === restoreFrame.focus;\n" +
+    "    if (!items.length) el(\"p\", \"No items found.\", main);\n" +
+    "    else {\n" +
+    "      var grid = cards(items, main);\n" +
+    "      var restoreFrame = stack[stack.length - 1];\n" +
+    "      var restore = Array.prototype.find.call(grid.children, function (card) {\n" +
+    "        return restoreFrame && card.dataset.item === restoreFrame.focus;\n" +
+    "      });\n" +
+    "      (restore || grid.firstElementChild).focus();\n" +
+    "    }\n" +
+    // Plex watchlist titles that are not in the library yet (fork/plex.js).
+    "    if (window.WholphinPlexMissing) window.WholphinPlexMissing({\n" +
+    "      parent: main,\n" +
+    "      valid: function () { return r === revision; },\n" +
+    "      cards: function (list, parent, onSelect) { return cards(list, parent, null, null, onSelect); },\n" +
     "    });\n" +
-    "    (restore || grid.firstElementChild).focus();\n" +
     "  }\n" +
+    // Pages of the fork outside the library (TMDB information page), with Back like any page.
+    "  window.WholphinPage = function (title, build) {\n" +
+    "    run(function () {\n" +
+    "      return go(function () {\n" +
+    "        var pageRevision = reset(title);\n" +
+    "        main.className = \"detail-page fork-collection-page fork-tmdb-page\";\n" +
+    "        return build(main, function () { return pageRevision === revision; });\n" +
+    "      });\n" +
+    "    });\n" +
+    "  };\n" +
     "  async function seasonsPage(seriesId) {",
   "Playlist page",
 );
