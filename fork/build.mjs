@@ -110,7 +110,7 @@ await patch(
 await patch(
   "app.js",
   "return detail(item.Id, !!item.IsLiveProgram);",
-  "return item.Type === \"Playlist\" ? forkPlaylist(item) : item.Type === \"BoxSet\" ? listing(item.Id, item.Name) : detail(item.Id, !!item.IsLiveProgram);",
+  "return item.Type === \"Playlist\" ? forkPlaylist(item) : item.Type === \"BoxSet\" ? forkCollection(item) : detail(item.Id, !!item.IsLiveProgram);",
   "Playlist and collection open their items",
 );
 // A playlist opens its items directly (no detail page and "Browse" step), loaded at once,
@@ -237,6 +237,62 @@ await patch(
     "            main.scrollTop = 0;\n" +
     "          }",
   "Series page: Play focused",
+);
+// A collection opens a page as in Plex: collection poster, years and description, a Play
+// button (first movie not yet watched) and the movies below, with title and year.
+await patch(
+  "app.js",
+  "  async function seasonsPage(seriesId) {",
+  "  async function forkCollection(item) {\n" +
+    "    var r = reset(item.Name);\n" +
+    "    var data = await Promise.all([\n" +
+    "      api(\"/Users/\" + session.user + \"/Items/\" + item.Id),\n" +
+    "      api(\"/Users/\" + session.user + \"/Items\", {\n" +
+    "        ParentId: item.Id,\n" +
+    "        SortBy: \"ProductionYear,PremiereDate,SortName\",\n" +
+    "        Fields: \"PrimaryImageAspectRatio,ProductionYear,UserData\",\n" +
+    "      }),\n" +
+    "    ]);\n" +
+    "    if (r !== revision) return;\n" +
+    "    var full = data[0], movies = data[1].Items || [];\n" +
+    "    main.className = \"detail-page fork-collection-page\";\n" +
+    "    setBackdrop(full);\n" +
+    "    if (full.ImageTags && full.ImageTags.Primary) {\n" +
+    "      var poster = el(\"img\", null, null);\n" +
+    "      poster.className = \"fork-series-poster\";\n" +
+    "      poster.alt = \"\";\n" +
+    "      main.insertBefore(poster, main.firstChild);\n" +
+    "      main.classList.add(\"fork-has-poster\");\n" +
+    "      setImageSource(poster, session.server + \"/Items/\" + encodeURIComponent(full.Id) + \"/Images/Primary?maxWidth=450&quality=85\");\n" +
+    "    }\n" +
+    "    var years = movies.map(function (m) { return m.ProductionYear; }).filter(Boolean),\n" +
+    "      first = Math.min.apply(null, years), last = Math.max.apply(null, years),\n" +
+    "      facts = [];\n" +
+    "    if (full.OfficialRating) facts.push(full.OfficialRating);\n" +
+    "    if (years.length) facts.push(first === last ? String(first) : first + \" — \" + last);\n" +
+    "    if (facts.length) el(\"p\", facts.join(\" · \"), main).className = \"metadata\";\n" +
+    "    if (full.Overview) el(\"p\", full.Overview, main).className = \"overview\";\n" +
+    "    var actions = el(\"div\", null, main);\n" +
+    "    actions.className = \"actions\";\n" +
+    "    var next = movies.find(function (m) { return !(m.UserData && m.UserData.Played); }) || movies[0];\n" +
+    "    var playButton = next && button(\"Play\", function () {\n" +
+    "      return play(next, (next.UserData && next.UserData.PlaybackPositionTicks) || 0, true);\n" +
+    "    }, actions);\n" +
+    "    var section = el(\"section\", null, main);\n" +
+    "    section.className = \"fork-collection-movies\";\n" +
+    "    el(\"h2\", movies.length === 1 ? \"1 movie\" : movies.length + \" movies\", section);\n" +
+    "    if (!movies.length) return;\n" +
+    "    var grid = cards(movies, section);\n" +
+    "    grid.classList.add(\"season-grid\", \"rail\", \"portrait\");\n" +
+    "    var restoreFrame = stack[stack.length - 1];\n" +
+    "    var restore = Array.prototype.find.call(grid.children, function (card) {\n" +
+    "      return restoreFrame && card.dataset.item === restoreFrame.focus;\n" +
+    "    });\n" +
+    "    focusContent(restore || playButton || grid.firstElementChild);\n" +
+    "    main.scrollTop = 0;\n" +
+    "  }\n" +
+    "  async function seasonsPage(seriesId) {",
+  "Collection page",
 );
 // Theme music (fork/playback/theme.js): detail pages and the season view report their item.
 await patch(

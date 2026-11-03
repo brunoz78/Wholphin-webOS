@@ -802,6 +802,8 @@
   "This device only. Supported display modes are requested during native playback and restored afterward. HDMI changes may briefly blank the screen.": "Nur dieses Gerät. Unterstützte Bildmodi werden bei nativer Wiedergabe angefordert und danach zurückgesetzt. Beim HDMI-Wechsel kann das Bild kurz schwarz werden.",
   "Updates come from JoeKer1/Wholphin-webOS on GitHub. Fire TV will ask you to confirm installation. Your sign-in and settings are kept.": "Updates kommen von GitHub. Fire TV fragt vor der Installation nach. Anmeldung und Einstellungen bleiben erhalten.",
   "Use a different Seerr account": "Anderes Seerr-Konto verwenden",
-  "Uses segment timestamps supplied by your Jellyfin server.": "Nutzt die Abschnitte, die dein Jellyfin-Server liefert (z. B. vom Intro Skipper)."
+  "Uses segment timestamps supplied by your Jellyfin server.": "Nutzt die Abschnitte, die dein Jellyfin-Server liefert (z. B. vom Intro Skipper).",
+  "1 movie": "1 Film",
+  "{0} movies": "{0} Filme"
  }
 }

@@ -151,6 +151,17 @@
   margin: 0 0 12px;
 }
 
+/* Collection page as in Plex: movie titles white, years in a quieter grey. */
+.fork-collection-page {
+  padding-top: 60px;
+}
+.fork-collection-page .card-title {
+  color: #fff;
+}
+.fork-collection-page .card-subtitle {
+  color: #a9a3b3;
+}
+
 /* Checkboxes (e.g. "Customize Home"): the TV draws native checkboxes without a check mark,
    so every box looked empty. Drawn here: violet with a white check when on. */
 #main input[type="checkbox"] {
