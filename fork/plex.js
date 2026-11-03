@@ -123,10 +123,20 @@
   function setWatched(ratingKey, on) {
     return request("PUT", METADATA + "/actions/" + (on ? "scrobble" : "unscrobble") + "?identifier=tv.plex.provider.discover&key=" + encodeURIComponent(ratingKey));
   }
-  // Watchlist entries, newest first, with their TMDB numbers.
+  // Watchlist entries, newest first, with their TMDB numbers. Plex hands out at most 100 per request.
   function watchlist() {
-    return request("GET", DISCOVER + "/library/sections/watchlist/all?includeGuids=1&sort=watchlistedAt:desc&X-Plex-Container-Start=0&X-Plex-Container-Size=500").then(function (data) {
-      return ((data.MediaContainer || {}).Metadata || []).map(function (item) {
+    var all = [];
+    function page(start) {
+      return request("GET", DISCOVER + "/library/sections/watchlist/all?includeGuids=1&sort=watchlistedAt%3Adesc&X-Plex-Container-Start=" + start + "&X-Plex-Container-Size=100").then(function (data) {
+        var container = data.MediaContainer || {},
+          items = container.Metadata || [];
+        all = all.concat(items);
+        if (items.length && all.length < (container.totalSize || 0) && start < 2000) return page(start + 100);
+        return all;
+      });
+    }
+    return page(0).then(function (items) {
+      return items.map(function (item) {
         var tmdb = null;
         guidsOf(item).forEach(function (g) {
           if (g.indexOf("tmdb://") === 0) tmdb = g.slice(7);
