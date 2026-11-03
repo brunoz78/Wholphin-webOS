@@ -31,6 +31,7 @@
 
   var audio = new Audio(),
     ownerId = null, // movie or series whose theme plays (or is being looked up)
+    pending = false, // theme of ownerId is being looked up
     fadeTimer = null;
   audio.preload = "auto";
 
@@ -48,6 +49,7 @@
   }
   function stop() {
     ownerId = null;
+    pending = false;
     if (audio.paused) return;
     fadeTo(0, function () {
       audio.pause();
@@ -62,11 +64,13 @@
     var id = item.Type === "Episode" || item.Type === "Season" ? item.SeriesId : item.Id;
     if (!id || (item.Type !== "Movie" && item.Type !== "Series" && item.Type !== "Season" && item.Type !== "Episode"))
       return stop();
-    if (id === ownerId) return; // same movie or series: keep playing
+    // Same movie or series: keep playing. A theme that ended or failed starts again.
+    if (id === ownerId && (pending || !audio.paused)) return;
     stop();
     ownerId = id;
     var s = session();
     if (!s || !s.token) return;
+    pending = true;
     fetch(s.server + "/Items/" + encodeURIComponent(id) + "/ThemeSongs?UserId=" + encodeURIComponent(s.user) + "&InheritFromParent=true", {
       headers: { Authorization: 'MediaBrowser Client="Wholphin", Device="LG TV", DeviceId="' + (localStorage.getItem("wholphin-device") || "") + '", Version="fork", Token="' + s.token + '"' },
       credentials: "omit",
@@ -77,14 +81,18 @@
       })
       .then(function (data) {
         var song = (data.Items || [])[0];
-        if (!song || ownerId !== id || !onDetailPage()) return;
+        if (ownerId !== id) return;
+        pending = false;
+        if (!song || !onDetailPage()) return;
         audio.src = s.server + "/Audio/" + encodeURIComponent(song.Id) + "/stream?static=true&api_key=" + encodeURIComponent(s.token);
         audio.volume = 0;
         var started = audio.play();
         if (started && started.catch) started.catch(function () {});
         fadeTo(VOLUME);
       })
-      .catch(function () {});
+      .catch(function () {
+        if (ownerId === id) pending = false;
+      });
   };
 
   function onDetailPage() {

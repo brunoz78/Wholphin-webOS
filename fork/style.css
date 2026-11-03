@@ -87,6 +87,24 @@
   background: rgba(166, 122, 255, 0.18);
 }
 
+/* Series page as in Plex: poster beside the title block, seasons below it.
+   "Continue watching" stays in the page (the Play button uses it) but is not shown. */
+.fork-series-poster {
+  float: left;
+  width: 240px;
+  height: 360px;
+  margin: 8px 40px 24px 0;
+  border-radius: 8px;
+  object-fit: cover;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.fork-has-poster > section {
+  clear: both;
+}
+.series-detail .series-continue {
+  display: none !important;
+}
+
 /* Live playback overlay (key 0 during playback). */
 #fork-stats {
   position: absolute;

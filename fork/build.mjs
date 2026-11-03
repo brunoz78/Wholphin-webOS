@@ -113,14 +113,25 @@ await patch(
   "return item.Type === \"Playlist\" ? forkPlaylist(item) : detail(item.Id, !!item.IsLiveProgram);",
   "Playlist opens its items",
 );
-// A playlist opens its items directly (no detail page and "Browse" step), loaded at once.
-// Episodes are shown as their series, once, in playlist order: watchlists synced from Plex
-// (e.g. by CrossWatch) list every single episode of a series.
+// A playlist opens its items directly (no detail page and "Browse" step), loaded at once,
+// newest first: watchlists synced from Plex (e.g. by CrossWatch) append new entries at the end.
+// Episodes are shown as their series, once: such watchlists list every single episode.
+// The playlist "Watchlist" and the playlists library are called "Merkliste", as in Plex, and
+// the library opens its only playlist directly.
 await patch(
   "app.js",
   "  async function seasonsPage(seriesId) {",
-  "  async function forkPlaylist(item) {\n" +
-    "    var r = reset(item.Name);\n" +
+  "  function forkWatchlistName(name) {\n" +
+    "    var german = !window.wholphinI18n || window.wholphinI18n.lang !== \"en\";\n" +
+    "    return name === \"Watchlist\" || name === \"Playlists\" ? (german ? \"Merkliste\" : \"Watchlist\") : name;\n" +
+    "  }\n" +
+    "  async function forkPlaylists(library) {\n" +
+    "    var found = await api(\"/Users/\" + session.user + \"/Items\", { ParentId: library.Id, Limit: 2 });\n" +
+    "    var only = (found.Items || []).length === 1 && found.Items[0].Type === \"Playlist\" ? found.Items[0] : null;\n" +
+    "    return only ? forkPlaylist(only) : listing(library.Id, forkWatchlistName(library.Name));\n" +
+    "  }\n" +
+    "  async function forkPlaylist(item) {\n" +
+    "    var r = reset(forkWatchlistName(item.Name));\n" +
     "    main.className = \"library-page fork-playlist-page\";\n" +
     "    var info = el(\"p\", \"Loading…\", main);\n" +
     "    info.className = \"metadata\";\n" +
@@ -130,7 +141,7 @@ await patch(
     "    });\n" +
     "    if (r !== revision) return;\n" +
     "    var entries = [], seriesIds = [], seen = {};\n" +
-    "    (data.Items || []).forEach(function (entry) {\n" +
+    "    (data.Items || []).slice().reverse().forEach(function (entry) {\n" +
     "      if (entry.Type === \"Episode\" && entry.SeriesId) {\n" +
     "        if (seen[entry.SeriesId]) return;\n" +
     "        seen[entry.SeriesId] = true;\n" +
@@ -161,6 +172,71 @@ await patch(
     "  }\n" +
     "  async function seasonsPage(seriesId) {",
   "Playlist page",
+);
+await patch(
+  "app.js",
+  '        label = name === "tv" ? "TV" : name === "kids tv" ? "Kids TV" : item.Name;',
+  '        label = name === "tv" ? "TV" : name === "kids tv" ? "Kids TV" : item.CollectionType === "playlists" ? forkWatchlistName(item.Name) : item.Name;',
+  "Playlists library called Merkliste",
+);
+await patch(
+  "app.js",
+  "              : listing(item.Id, item.Name);",
+  "              : item.CollectionType === \"playlists\" ? forkPlaylists(item) : listing(item.Id, item.Name);",
+  "Playlists library opens its only playlist",
+);
+
+// Series page as in Plex: series poster beside the title, season posters instead of the series
+// poster, no "Continue watching" row (it stays hidden for the Play button, see style.css).
+await patch(
+  "app.js",
+  "    else if (!landscape && item.SeriesId) id = item.SeriesId;",
+  "    else if (!landscape && item.SeriesId && !(item.Type === \"Season\" && tags.Primary)) id = item.SeriesId;",
+  "Season posters",
+);
+await patch(
+  "app.js",
+  '      "detail-page" + (item.Type === "Series" ? " series-detail" : item.Type === "Movie" ? " movie-detail" : "");',
+  '      "detail-page" + (item.Type === "Series" ? " series-detail" : item.Type === "Movie" ? " movie-detail" : "");\n' +
+    '    if (item.Type === "Series" && item.ImageTags && item.ImageTags.Primary) {\n' +
+    '      var forkPoster = el("img", null, null);\n' +
+    '      main.insertBefore(forkPoster, main.firstChild);\n' +
+    '      forkPoster.className = "fork-series-poster";\n' +
+    '      forkPoster.alt = "";\n' +
+    '      main.classList.add("fork-has-poster");\n' +
+    '      setImageSource(forkPoster, session.server + "/Items/" + encodeURIComponent(item.Id) + "/Images/Primary?maxWidth=450&quality=85");\n' +
+    "    }",
+  "Series poster",
+);
+// Remote on the series page: down from Play leads to the seasons (the original jumps to the cast),
+// up from the seasons back to Play (the hidden "Continue watching" row cannot take the focus).
+await patch(
+  "app.js",
+  '    if ((!playing || livePreview) && key === 40 && active.closest(".actions")) {',
+  '    if ((!playing || livePreview) && key === 40 && active.closest(".actions") && main.querySelector(".season-grid .card")) {\n' +
+    '      focusContent(main.querySelector(".season-grid .card"));\n' +
+    "      return;\n" +
+    "    }\n" +
+    '    if ((!playing || livePreview) && key === 40 && active.closest(".actions")) {',
+  "Series page: Play down to the seasons",
+);
+await patch(
+  "app.js",
+  '            main.querySelector(".series-continue .card") ||',
+  '            (main.classList.contains("series-detail") ? null : main.querySelector(".series-continue .card")) ||',
+  "Series page: seasons up to Play",
+);
+// The series page opens with Play focused, as in Plex (the original focuses the hidden row).
+await patch(
+  "app.js",
+  "          seriesPlay.disabled = false;",
+  "          seriesPlay.disabled = false;\n" +
+    '          if (document.activeElement === main.querySelector(".season-grid .card") &&\n' +
+    "              !(stack[stack.length - 1] && stack[stack.length - 1].focus)) {\n" +
+    "            seriesPlay.focus();\n" +
+    "            main.scrollTop = 0;\n" +
+    "          }",
+  "Series page: Play focused",
 );
 // Theme music (fork/playback/theme.js): detail pages and the season view report their item.
 await patch(
