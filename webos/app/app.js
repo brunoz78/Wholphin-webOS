@@ -138,7 +138,7 @@
       P.deviceName +
       '", DeviceId="' +
       device +
-      '", Version="0.2.78"' +
+      '", Version="0.2.80"' +
       (context && context.token ? ', Token="' + context.token + '"' : "")
     );
   }
@@ -198,7 +198,7 @@
         var limit = 2097152;
         if (Number(response.headers.get("content-length")) > limit) {
           if (response.body) await response.body.cancel();
-          throw new Error("Subtitle file is too large.");
+          throw Object.assign(new Error("Subtitle file is too large."), {code: "SUBTITLE_TOO_LARGE"});
         }
         var reader = response.body.getReader(),
           chunks = [],
@@ -210,7 +210,7 @@
             bytes += part.value.length;
             if (bytes > limit) {
               await reader.cancel();
-              throw new Error("Subtitle file is too large.");
+              throw Object.assign(new Error("Subtitle file is too large."), {code: "SUBTITLE_TOO_LARGE"});
             }
             chunks.push(part.value);
           }
@@ -274,6 +274,7 @@
     logoRequest++;
     if (homeRowObserver) homeRowObserver.disconnect();
     if (posterObserver) posterObserver.disconnect();
+    main.refreshPlaybackUserData = null;
     main.textContent = "";
     main.className = "";
     main.scrollTop = 0;
@@ -935,7 +936,7 @@
       vision.hidden = true;
     }
     row(device, "Screensaver", "", "Artwork, idle delay and clock for this profile.", function () { return go(screensaverSettings); });
-    var about = section("About", "Ember for Jellyfin · v0.2.78");
+    var about = section("About", "Ember for Jellyfin · v0.2.80");
     var server = el("p", "Connected to " + session.server, about);
     server.className = "settings-description";
     row(
@@ -2661,6 +2662,53 @@
       if (node) loadPoster(node.querySelector("img[data-src]"));
     });
   }
+  function updateCardUserData(card, item) {
+    var art = card.querySelector(".art");
+    if (!art) return;
+    Array.prototype.forEach.call(art.querySelectorAll(".card-progress, .watched-badge"), function (node) { node.remove(); });
+    var data = item.UserData || {};
+    if (item.Type === "Season") {
+      Array.prototype.forEach.call(art.querySelectorAll(".episode-badge"), function (node) { node.remove(); });
+      if (data.UnplayedItemCount > 0)
+        el("span", String(data.UnplayedItemCount), art).className = "episode-badge";
+    }
+    var watched = !!data.Played || (item.Type === "Season" &&
+      data.UnplayedItemCount === 0 && (item.RecursiveItemCount > 0 || item.ChildCount > 0));
+    card.dataset.watched = String(watched);
+    if (watched) {
+      var badge = el("span", "✓", art);
+      badge.className = "watched-badge";
+      badge.setAttribute("aria-label", "Watched");
+    } else if (data.PlayedPercentage > 0 && data.PlayedPercentage < 100) {
+      var progress = el("div", null, art); progress.className = "card-progress";
+      el("div", null, progress).style.width = Math.min(100, data.PlayedPercentage) + "%";
+    }
+  }
+  function refreshUserData(item, data, account) {
+    item.UserData = Object.assign({}, item.UserData, data);
+    if (session !== account) return;
+    homeCache.clear(); listingStates.clear(); previewCache.clear();
+    Array.prototype.forEach.call(main.querySelectorAll(".card[data-item]"), function (card) {
+      if (card.dataset.item !== item.Id) return;
+      if (card.item) card.item.UserData = Object.assign({}, card.item.UserData, data);
+      updateCardUserData(card, item);
+    });
+    if (main.refreshPlaybackUserData) main.refreshPlaybackUserData(item, data);
+    if (item.Type === "Episode" && item.ParentId) {
+      var parentCards = Array.prototype.filter.call(main.querySelectorAll(".card[data-item]"), function (card) {
+        return card.dataset.item === item.ParentId && card.item && card.item.Type === "Season";
+      });
+      if (parentCards.length) api("/Users/" + encodeURIComponent(account.user) + "/Items/" + encodeURIComponent(item.ParentId), null, null, null,
+        { session: account, timeoutMs: 5000 }).then(function (season) {
+          if (session !== account || !season.UserData) return;
+          parentCards.forEach(function (card) {
+            if (!main.contains(card)) return;
+            card.item = season;
+            updateCardUserData(card, season);
+          });
+        }).catch(function () {});
+    }
+  }
   function cards(items, parent, layout, existing, onSelect) {
     var grid = existing || el("div", null, parent);
     if (!existing) grid.className = layout ? "rail " + layout : "grid";
@@ -2676,6 +2724,7 @@
         grid,
       );
       b.className = "card";
+      b.item = item;
       b.dataset.item = item.Id;
       b.setAttribute("aria-label", item.Name);
       if (item.Type === "Episode") b.episodeItem = item;
@@ -2709,19 +2758,7 @@
         if (item.IndexNumber != null)
           el("span", "E" + item.IndexNumber, art).className = "episode-badge";
       }
-      if (
-        item.Type === "Season" &&
-        item.UserData &&
-        item.UserData.UnplayedItemCount > 0
-      )
-        el("span", String(item.UserData.UnplayedItemCount), art).className =
-          "episode-badge";
-      var percent = item.UserData && item.UserData.PlayedPercentage;
-      if (percent > 0 && percent < 100) {
-        var progress = el("div", null, art);
-        progress.className = "card-progress";
-        el("div", null, progress).style.width = Math.min(100, percent) + "%";
-      }
+      updateCardUserData(b, item);
       el("span", item.SeriesName || item.Name, b).className = "card-title";
       var subtitle = item.SeriesName
         ? "S" +
@@ -2866,21 +2903,17 @@
       return row;
     });
   }
-  async function setWatched(item, watched, signal) {
-    var context = session;
+  async function setWatched(item, watched, signal, options) {
+    var context = options && options.session || session;
     var data = await api(
       "/Users/" + encodeURIComponent(context.user) + "/PlayedItems/" + encodeURIComponent(item.Id),
-      null, null, watched ? "POST" : "DELETE", { session: context, signal: signal },
+      null, null, watched ? "POST" : "DELETE", Object.assign({}, options, { session: context, signal: signal }),
     );
     // Jellyfin resets the resume point for both watched-state mutations.
     item.UserData = Object.assign({}, item.UserData, {
       Played: watched, PlaybackPositionTicks: 0, PlayedPercentage: watched ? 100 : 0,
     }, watched ? {} : { PlayCount: 0, LastPlayedDate: null }, data || {});
-    if (session !== context) return;
-    // Home recommendations and filtered/season listings also depend on watched state.
-    homeCache.clear();
-    listingStates.clear();
-    previewCache.clear();
+    refreshUserData(item, item.UserData, context);
   }
   async function home(tvLibraryItem) {
     var r = reset(tvLibraryItem ? tvLibraryItem.Name : "Home"),
@@ -3398,7 +3431,7 @@
             return seasonBrowser(
               season.Id,
               context.title + " · " + season.Name,
-              context,
+              Object.assign({}, context, { episodeId: null }),
             );
           };
           var frame = stack[stack.length - 1];
@@ -3505,22 +3538,44 @@
     );
     favorite.className = "favorite-heart";
     favorite.appendChild(navIcon("favorites"));
-    button(
+    var moreButton = button(
       "More options",
       function () {
-        if (selected) {
-          var episode = selected,
-            parentFrame = stack[stack.length - 1];
-          var result = go(function () {
-            return detail(episode.Id);
-          });
-          if (parentFrame) parentFrame.focus = episode.Id;
-          return result;
-        }
+        extraActions.hidden = !extraActions.hidden;
+        moreButton.setAttribute("aria-expanded", String(!extraActions.hidden));
+        if (!extraActions.hidden) focusContent(extraActions.querySelector("button"));
       },
       actions,
     );
-    if (context.seasons.length > 1) button("All seasons", back, actions);
+    moreButton.id = "detail-more-button";
+    moreButton.setAttribute("aria-expanded", "false");
+    var extraActions = el("div", null, main);
+    extraActions.id = "detail-more-options";
+    extraActions.className = "detail-more-options";
+    extraActions.setAttribute("role", "dialog");
+    extraActions.setAttribute("aria-label", "More options");
+    extraActions.hidden = true;
+    button("Play from beginning", function () {
+      if (selected) return play(selected, 0, false, false, episodeSubtitles ? episodeSubtitles.options() : {});
+    }, extraActions);
+    button("Add to queue", function () {
+      if (!selected) return;
+      if ((playing && playing.item.Id === selected.Id) || queueItems.some(function (entry) { return entry.Id === selected.Id; }))
+        return message("Already playing or in the queue.");
+      if (queueItems.length >= 100) return message("The queue holds up to 100 videos.");
+      queueItems.push(selected);
+      message("Added to queue: " + selected.Name);
+      updatePlaybackButtons();
+    }, extraActions);
+    button("View playback queue", function () { return go(queuePage); }, extraActions);
+    button("Close", function () {
+      extraActions.hidden = true;
+      moreButton.setAttribute("aria-expanded", "false");
+      moreButton.focus();
+    }, extraActions);
+    if (context.seasons.length > 1) button("All seasons", function () {
+      return go(function () { return detail(context.seriesId); });
+    }, actions);
     function paint(item) {
       selected = item;
       name.textContent = item.Name;
@@ -3551,6 +3606,13 @@
       formatPills(item, specs);
       setBackdrop(item);
     }
+    main.refreshPlaybackUserData = function (item, data) {
+      if (valid() && selected && selected.Id === item.Id) {
+        selectedRequest++; clearTimeout(timer);
+        selected.UserData = Object.assign({}, selected.UserData, data);
+        paint(selected);
+      }
+    };
     function select(item) {
       if (selected && selected.Id === item.Id) return;
       paint(item);
@@ -3624,21 +3686,23 @@
           (Number.isFinite(data.TotalRecordCount)
             ? offset >= data.TotalRecordCount
             : batch.length < 48);
-        cards(fresh, grid, "landscape", grid);
+        cards(fresh, grid, "landscape", grid, activateEpisode);
         status.textContent = done
           ? items.length
             ? ""
             : "No episodes available."
           : "Scroll for more episodes.";
         var frame = stack[stack.length - 1],
-          saved = frame && frame.focus;
+          saved = context.episodeId || (frame && frame.focus);
         if (!selected && items.length) {
           var first =
             Array.prototype.find.call(grid.children, function (card) {
               return card.dataset.item === saved;
             }) || grid.firstElementChild;
-          first.focus();
-          main.scrollTop = 0;
+          if (!context.episodeId || first.dataset.item === context.episodeId || done) {
+            first.focus();
+            main.scrollTop = 0;
+          }
         }
       } catch (error) {
         if (!valid()) return;
@@ -3706,7 +3770,9 @@
             at = controls.indexOf(active);
           if (key === 37 || key === 39)
             focusContent(controls[at + (key === 37 ? -1 : 1)]);
-          else if (key === 40) focusContent(grid.querySelector(".card"));
+          else if (key === 40) focusContent(Array.prototype.find.call(grid.children, function (card) {
+            return selected && card.dataset.item === selected.Id;
+          }) || grid.querySelector(".card"));
           return true;
         }
         if (grid.contains(active) && key === 38) {
@@ -3728,16 +3794,27 @@
         return false;
       },
     };
+    function activateEpisode(item) {
+      select(item);
+      var frame = stack[stack.length - 1];
+      if (frame) frame.focus = item.Id;
+      focusContent(playButton);
+    }
     if (items.length) {
       status.textContent = done ? "" : "Scroll for more episodes.";
-      cards(items, grid, "landscape", grid);
+      cards(items, grid, "landscape", grid, activateEpisode);
       var parentFrame = stack[stack.length - 1];
       var restore = Array.prototype.find.call(grid.children, function (card) {
-        return parentFrame && card.dataset.item === parentFrame.focus;
+        return card.dataset.item === (context.episodeId || (parentFrame && parentFrame.focus));
       });
-      (restore || grid.firstElementChild).focus();
+      if (restore || !context.episodeId || done) (restore || grid.firstElementChild).focus();
       main.scrollTop = 0;
     } else await load();
+    while (valid() && !selected && !done && !loading) {
+      var before = offset;
+      await load();
+      if (offset === before) break;
+    }
   }
   async function listing(id, title, focusControl, seasonContext, tvContext) {
     if (seasonContext) return seasonBrowser(id, title, seasonContext);
@@ -5629,6 +5706,23 @@
     );
     if (liveProgram) item.IsLiveProgram = true;
     if (r !== revision) return;
+    if (item.Type === "Episode") {
+      if (!item.SeriesId) throw new Error("This episode is missing its series information in Jellyfin.");
+      var episodeSeasons = await seasonChoices(item.SeriesId);
+      if (r !== revision) return;
+      var episodeSeason = episodeSeasons.find(function (season) {
+        return season.Id === item.SeasonId || season.Id === item.ParentId;
+      }) || episodeSeasons.find(function (season) {
+        return season.IndexNumber === item.ParentIndexNumber;
+      });
+      if (!episodeSeason) throw new Error("This episode's season could not be found in Jellyfin.");
+      return seasonBrowser(episodeSeason.Id, item.SeriesName || "Series", {
+        seriesId: item.SeriesId,
+        title: item.SeriesName || "Series",
+        seasons: episodeSeasons,
+        episodeId: item.Id,
+      });
+    }
     var showSeasons = [],
       seasonsError = null,
       seriesReady = null;
@@ -6314,6 +6408,40 @@
     el("p", "When enabled, English subtitles are selected for known non-English audio if a matching track is available. Missing or unknown audio languages do not trigger this rule.", main);
     focusContent(list.querySelector("button"));
   }
+  async function loadSubtitleCues(item, source, index, signal) {
+    var account = profileAccount();
+    for (var attempt = 0; attempt < 2; attempt++) {
+      if ((signal && signal.aborted) || !session || session.server !== account.server || session.user !== account.user)
+        throw new DOMException("Subtitle loading cancelled.", "AbortError");
+      try {
+        var text = await api("/Videos/" + encodeURIComponent(item.Id) + "/" + encodeURIComponent(source.Id) + "/Subtitles/" + index + "/Stream.vtt",
+          {StartPositionTicks: 0, CopyTimestamps: true, AddVttTimeMap: false}, null, "GET",
+          {session: account, signal: signal, subtitleText: true, timeoutMs: attempt ? 10000 : 20000});
+        var cues = C.parseSubtitles(text);
+        if (!cues.length) throw new Error("No subtitle cues were returned.");
+        return cues;
+      } catch (error) {
+        if (attempt || (signal && signal.aborted) || error.code === "SUBTITLE_TOO_LARGE" ||
+            (error.status && error.status !== 408 && error.status < 500)) throw error;
+        // Jellyfin may still be extracting an embedded track after a failed first response.
+        await new Promise(function (resolve, reject) {
+          function cancel() {
+            clearTimeout(timer);
+            if (signal) signal.removeEventListener("abort", cancel);
+            reject(new DOMException("Subtitle loading cancelled.", "AbortError"));
+          }
+          var timer = setTimeout(function () {
+            if (signal) signal.removeEventListener("abort", cancel);
+            resolve();
+          }, 300);
+          if (signal) {
+            if (signal.aborted) cancel();
+            else signal.addEventListener("abort", cancel);
+          }
+        });
+      }
+    }
+  }
   function subtitleOptions() {
     var style = C.subtitleStyle(readPreference("subtitle-appearance", { enabled: !P.nativeSubtitle }));
     // Legacy appearance delays are global and must never carry into another video.
@@ -6726,7 +6854,7 @@
     document.getElementById("previous-video").disabled = !active || active.live || !playbackHistory.length;
     document.getElementById("next-video").hidden = !!(active && active.live);
     document.getElementById("next-video").disabled =
-      !active || active.live || (!queueItems.length && !active.episodes.length);
+      !active || active.live || (!queueItems.length && !active.episodes.length && !active.nextError);
   }
   function loadFollowing(active) {
     active.nextError = null;
@@ -6745,16 +6873,19 @@
     )
       .then(function (data) {
         if (playing !== active) return;
+        if ((data.Items || []).length && !(data.Items || []).some(function (item) { return item.Id === active.item.Id; }))
+          throw new Error("The server did not include the current episode.");
         active.episodes = C.followingEpisodes(active.item, data.Items || []);
         updatePlaybackButtons();
       })
       .catch(function (error) {
-        if (playing === active) active.nextError = error.message;
+        if (playing === active) { active.nextError = error.message; updatePlaybackButtons(); }
       });
+    return active.following;
   }
   function loadPlaybackExtras(active) {
     if (active.live) return;
-    if (!Array.isArray(active.item.Chapters) || !active.source.MediaStreams) {
+    if (!Array.isArray(active.item.Chapters) || !active.source.MediaStreams || (active.item.Type === "Episode" && !active.item.SeriesId)) {
       active.metadata = api(
         "/Users/" +
           session.user +
@@ -6770,6 +6901,7 @@
         .then(function (item) {
           if (playing !== active) return;
           active.item = Object.assign({}, active.item, item);
+          if (active.item.Type === "Episode" && active.item.SeriesId && !active.following) loadFollowing(active);
           if (!active.source.MediaStreams) {
             var source = (item.MediaSources || []).find(function (entry) {
               return entry.Id === active.source.Id;
@@ -7056,7 +7188,8 @@
     if (!active || active.live || busy || !active.started) return;
     var type = subtitle ? "Subtitle" : "Audio";
     var preference = C.trackPreference(active.source, type, index);
-    if ((subtitle ? active.subtitleIndex : active.audioIndex) === index) {
+    if ((subtitle ? active.subtitleIndex : active.audioIndex) === index &&
+        !(subtitle && index >= 0 && !active.subtitleCues && subtitleOptions().enabled && C.textSubtitle(active.source, index))) {
       rememberTrack(type, preference);
       if (subtitle) saveSubtitleChoice(active.item.Id, active.source, index);
       closePlaybackPanel();
@@ -7071,10 +7204,7 @@
         var style = subtitleOptions(), cues = null;
         style.delay = subtitleDelay(active.item, active.source, index);
         if (style.enabled && C.textSubtitle(active.source, index)) {
-          var text = await api("/Videos/" + encodeURIComponent(active.item.Id) + "/" + encodeURIComponent(active.source.Id) + "/Subtitles/" + index + "/Stream.vtt",
-            { StartPositionTicks: 0, CopyTimestamps: true, AddVttTimeMap: false }, null, "GET", { signal: active.extrasController.signal, subtitleText: true });
-          cues = C.parseSubtitles(text);
-          if (!cues.length) throw new Error("No subtitle cues returned");
+          cues = await loadSubtitleCues(active.item, active.source, index, active.extrasController.signal);
         }
         if (playing !== active) return;
         if (nativeSwitch) {
@@ -7097,7 +7227,7 @@
       } catch (error) {
         if (playing !== active) return;
         message("Could not change subtitles in place. " + error.message);
-      } finally { busy = false; }
+      } finally { busy = false; drainPendingAdvance(); }
     }
     var nextSubtitle = active.subtitleIndex;
     if (!subtitle && nextSubtitle < 0) {
@@ -7226,7 +7356,10 @@
   }
   async function advancePlayback(manual) {
     var active = playing;
-    if (!active || active.live || active.advancing || busy) return;
+    if (!active || active.live) return;
+    if (active.advancing) { if (!manual && active.completed) active.pendingAdvance = true; return; }
+    if (busy) { if (!manual && active.completed) active.pendingAdvance = true; return; }
+    active.pendingAdvance = false;
     if (!manual && document.hidden) {
       await stop();
       return;
@@ -7237,7 +7370,14 @@
     }
     active.advancing = true;
     try {
-      if (!queueItems.length) await active.following;
+      if (!queueItems.length && (manual || playbackOptions().autoplay)) {
+        await active.following;
+        if (playing === active && active.nextError && active.item.SeriesId) await loadFollowing(active);
+        if (playing === active && active.nextError) {
+          message("Could not load the next episode. Press Next video to retry.");
+          showControls(); return;
+        }
+      }
       if (playing !== active) return;
       var next =
         queueItems[0] ||
@@ -7255,6 +7395,7 @@
         return;
       }
       await play(next, 0, false, false, { episodeCount: active.episodeCount, preserveHistory: true });
+      if (!playing || playing === active) return;
       playbackHistory.push(active.item);
       if (playbackHistory.length > 100) playbackHistory.shift();
       updatePlaybackButtons();
@@ -7263,6 +7404,7 @@
       showControls();
     } finally {
       active.advancing = false;
+      drainPendingAdvance();
     }
   }
   async function compatibilityPlayback(active, automatic) {
@@ -7328,6 +7470,7 @@
 
   function position() {
     if (!playing) return 0;
+    if (playing.completedPositionTicks != null) return playing.completedPositionTicks;
     if (playing.failurePositionTicks != null)
       return playing.failurePositionTicks;
     if (!playing.started) return playing.resumeTicks;
@@ -7335,7 +7478,8 @@
   }
   function report(path, extra) {
     var active = playing;
-    if (!active || !active.started) return Promise.resolve();
+    if (!active || !active.started || active.completed || active.finishReporting) return Promise.resolve();
+    if (path === "/Progress" && active.progressPending) return active.reporting;
     var payload = Object.assign(
       {
         ItemId: active.item.Id,
@@ -7355,9 +7499,42 @@
     active.reporting = active.reporting
       .catch(function () {})
       .then(function () {
-        return api("/Sessions/Playing" + path, null, payload);
+        return api("/Sessions/Playing" + path, null, payload, "POST", {session: active.account, timeoutMs: 5000});
       });
+    if (path === "/Progress") {
+      active.progressPending = true;
+      active.reporting = active.reporting.finally(function () { active.progressPending = false; });
+    }
     return active.reporting;
+  }
+  async function finishPlaybackReporting(active, ticks) {
+    if (active.finishReporting) return active.finishReporting;
+    active.finishReporting = (async function () {
+      await active.reporting.catch(function () {});
+      if (!active.started) return;
+      try {
+        await api("/Sessions/Playing/Stopped", null, {
+          ItemId: active.item.Id, MediaSourceId: active.source.Id,
+          PlaySessionId: active.sessionId, PositionTicks: ticks,
+        }, "POST", {session: active.account, timeoutMs: 5000});
+      } catch (_) { /* A report failure must not block the next episode. */ }
+      if (active.live) return;
+      try {
+        var fresh = await api("/Users/" + encodeURIComponent(active.account.user) + "/Items/" + encodeURIComponent(active.item.Id), null, null, "GET", {session: active.account, timeoutMs: 5000});
+        if (active.completed && !(fresh.UserData && fresh.UserData.Played))
+          await setWatched(active.item, true, null, {session: active.account, timeoutMs: 5000});
+        else if (fresh.UserData) refreshUserData(active.item, fresh.UserData, active.account);
+      } catch (_) {
+        if (active.completed) {
+          try { await setWatched(active.item, true, null, {session: active.account, timeoutMs: 5000}); }
+          catch (_) { active.watchSaveFailed = true; }
+        }
+      }
+    })();
+    return active.finishReporting;
+  }
+  function drainPendingAdvance() {
+    if (playing && playing.pendingAdvance && !busy) run(function () { return advancePlayback(false); });
   }
   function finishResume() {
     var active = playing;
@@ -7529,32 +7706,13 @@
           )
             subtitleCues = previous.subtitleCues;
           else {
-            var text = await api(
-              "/Videos/" +
-                encodeURIComponent(item.Id) +
-                "/" +
-                encodeURIComponent(sourceMetadata.Id) +
-                "/Subtitles/" +
-                subtitleIndex +
-                "/Stream.vtt",
-              {
-                StartPositionTicks: 0,
-                CopyTimestamps: true,
-                AddVttTimeMap: false,
-              },
-              null,
-              "GET",
-              { signal: controller.signal, subtitleText: true },
-            );
-            subtitleCues = C.parseSubtitles(text);
-            if (!subtitleCues.length)
-              throw new Error("No subtitle cues were returned.");
+            subtitleCues = await loadSubtitleCues(item, sourceMetadata, subtitleIndex, controller.signal);
           }
         } catch (error) {
           if (controller.signal.aborted) throw error;
           subtitleCues = null;
           subtitleNotice =
-            "TV subtitle styling unavailable; using server-rendered subtitles for this video.";
+            "Text subtitles could not load; using server-rendered subtitles for this video. Select the track again to retry.";
         }
       }
       var deliveredSubtitleIndex = subtitleCues ? -1 : subtitleIndex;
@@ -7625,6 +7783,7 @@
       if (request !== playRequest || document.hidden) return;
       playing = Object.assign(selected, {
         item: item,
+        account: session,
         episodeCount:
           options.trackChange && previous
             ? previous.episodeCount
@@ -7727,6 +7886,7 @@
     } finally {
       if (playController === controller) playController = null;
       busy = false;
+      drainPendingAdvance();
       if (openedLive)
         await api(
           "/LiveStreams/Close",
@@ -7864,8 +8024,16 @@
     run(stop);
   };
   video.onended = function () {
-    run(function () {
-      return advancePlayback(false);
+    var active = playing;
+    if (!active || active.live || !active.started || active.completed) return;
+    active.completed = true;
+    active.completedPositionTicks = Math.max(position(), active.lastPositionTicks || 0,
+      Number.isFinite(video.duration) ? Math.round(video.duration * 10000000) : 0,
+      active.item.RunTimeTicks || 0);
+    clearInterval(timer);
+    run(async function () {
+      await finishPlaybackReporting(active, active.completedPositionTicks);
+      if (playing === active) return advancePlayback(false);
     });
   };
   video.onpause = function () {
@@ -7899,7 +8067,7 @@
     var stopped = playing,
       stoppedRevision = revision,
       ticks =
-        options.positionTicks != null ? options.positionTicks : position();
+        options.positionTicks != null ? options.positionTicks : stopped.completedPositionTicks != null ? stopped.completedPositionTicks : position();
     hideUpNext();
     playing = null;
     livePreview = false;
@@ -7920,39 +8088,18 @@
       stopped.returnFocus.isConnected
     )
       stopped.returnFocus.focus();
-    try {
-      await stopped.reporting.catch(function () {});
-      if (stopped.started)
-        await api("/Sessions/Playing/Stopped", null, {
-          ItemId: stopped.item.Id,
-          MediaSourceId: stopped.source.Id,
-          PlaySessionId: stopped.sessionId,
-          PositionTicks: ticks,
-        });
-    } finally {
-      try {
-        if (stopped.method === "Transcode")
-          await api(
-            "/Videos/ActiveEncodings",
-            { DeviceId: device, PlaySessionId: stopped.sessionId },
-            null,
-            "DELETE",
-          );
-      } finally {
-        if (stopped.source.LiveStreamId)
-          await api(
-            "/LiveStreams/Close",
-            { LiveStreamId: stopped.source.LiveStreamId },
-            { LiveStreamId: stopped.source.LiveStreamId },
-          );
-      }
+    await finishPlaybackReporting(stopped, ticks);
+    if (stopped.method === "Transcode") {
+      try { await api("/Videos/ActiveEncodings", {DeviceId: device, PlaySessionId: stopped.sessionId}, null, "DELETE", {session: stopped.account, timeoutMs: 3000}); } catch (_) {}
     }
-    homeCache.delete(accountKey("row:") + "continue");
-    homeCache.delete(accountKey("row:") + "next");
-    previewCache.delete(stopped.item.Id);
+    if (stopped.source.LiveStreamId) {
+      try { await api("/LiveStreams/Close", {LiveStreamId: stopped.source.LiveStreamId}, {LiveStreamId: stopped.source.LiveStreamId}, "POST", {session: stopped.account, timeoutMs: 3000}); } catch (_) {}
+    }
+    if (session === stopped.account) { homeCache.clear(); listingStates.clear(); previewCache.clear(); }
     if (
       !options.transition &&
       stopped.started &&
+      session === stopped.account &&
       !stopped.returnItem.IsLiveChannel &&
       revision === stoppedRevision &&
       !playing &&
