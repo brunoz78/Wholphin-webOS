@@ -45,7 +45,6 @@ await fs.copyFile(path.join(fork, "playback/stats.js"), path.join(out, "stats.js
 await fs.copyFile(path.join(fork, "login.js"), path.join(out, "login.js"));
 await fs.copyFile(path.join(fork, "nav.js"), path.join(out, "nav.js"));
 await fs.copyFile(path.join(fork, "extras.js"), path.join(out, "extras.js"));
-await fs.copyFile(path.join(fork, "playback/segments.js"), path.join(out, "segments.js"));
 await fs.copyFile(path.join(fork, "playback/theme.js"), path.join(out, "theme.js"));
 await fs.copyFile(path.join(fork, "style.css"), path.join(out, "fork.css"));
 
@@ -60,7 +59,7 @@ html = html
   .replace(
     appHook,
     '<script src="pgs.js"></script>\n    <script src="codecs.js"></script>\n    <script src="login.js"></script>\n    ' + appHook +
-      '\n    <script src="stats.js"></script>\n    <script src="nav.js"></script>\n    <script src="extras.js"></script>\n    <script src="segments.js"></script>',
+      '\n    <script src="stats.js"></script>\n    <script src="nav.js"></script>\n    <script src="extras.js"></script>',
   )
   // Theme music must exist before the app opens its first page.
   .replace(
@@ -177,6 +176,35 @@ await patch(
   '    main.className = "detail-page season-browser";\n' +
     '    if (window.WholphinTheme) window.WholphinTheme({ Id: context.seriesId, Type: "Series" });',
   "Theme music in the season view",
+);
+
+// Skipping segments comes from the original (intro and outro). The fork adds recaps and
+// previews, which the Intro Skipper plugin also marks, each with its own setting.
+await patch(
+  "core.js",
+  '      return s && (s.Type === "Intro" || s.Type === "Outro") &&',
+  '      return s && (s.Type === "Intro" || s.Type === "Recap" || s.Type === "Outro" || s.Type === "Preview") &&',
+  "Recaps and previews as segments",
+);
+// Jellyfin rejects or ignores a comma list in IncludeSegmentTypes (no segments at all),
+// so all segments are loaded and mediaSegments() in core.js picks the types.
+await patch(
+  "app.js",
+  '{IncludeSegmentTypes: "Intro,Outro"}',
+  '{}',
+  "Load all segments",
+);
+await patch(
+  "app.js",
+  '    ["intro", "outro"].forEach(function (kind) {',
+  '    ["intro", "recap", "outro", "preview"].forEach(function (kind) {',
+  "Settings for recaps and previews",
+);
+await patch(
+  "app.js",
+  '      var title = kind === "intro" ? "Skip intro" : "Skip outro",',
+  '      var title = "Skip " + kind,',
+  "Setting titles for recaps and previews",
 );
 
 // Rewind on resume (fork/extras.js): resuming starts a few seconds before the saved position.

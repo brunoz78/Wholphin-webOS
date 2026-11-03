@@ -106,7 +106,6 @@
   function mountSetting() {
     if (!main || !main.classList.contains("settings-page") || document.getElementById("fork-theme-row")) return;
     var anchor =
-      document.getElementById("fork-autoskip-row") ||
       document.getElementById("fork-rewind-row") ||
       main.querySelector('.setting-row[aria-label^="Autoplay next episode"]');
     if (!anchor) return;

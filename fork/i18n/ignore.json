@@ -11,5 +11,6 @@
  "metadata directors", "metadata episode-stream-details", "overview episode-browser-overview", "rail landscape episode-browser-rail library-grid", "rail portrait", "rail {0}",
  "section:not([hidden]) button", "server-error server-example", "tv-category-page tv-library-page",
  "{0}:favorite", "{0}:retry", "{0}:watch", "{0}continue", "{0}favorite-movies", "{0}favorite-series", "{0}next", "{0}px", "{0}vw",
- "kids shows", "kids tv", "tv shows", "valentine's day"
+ "kids shows", "kids tv", "tv shows", "valentine's day",
+ "Forward", "Intro", "Intro,Outro", "Outro", "Skip {0}", "{0} seconds", "· OK"
 ]

@@ -71,25 +71,6 @@
   grid-row: 3;
 }
 
-/* "Skip intro" button during playback (fork/playback/segments.js). */
-#fork-skip {
-  position: absolute;
-  right: 64px;
-  bottom: 260px;
-  z-index: 4;
-  padding: 16px 28px;
-  border: 2px solid #fff;
-  border-radius: 8px;
-  background: rgba(10, 8, 14, 0.82);
-  color: #fff;
-  font-size: 26px;
-  font-weight: 600;
-}
-#fork-skip:focus {
-  background: #fff;
-  color: #19151f;
-}
-
 /* Live playback overlay (key 0 during playback). */
 #fork-stats {
   position: absolute;
