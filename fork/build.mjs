@@ -106,12 +106,12 @@ await patch(
 );
 // Watched check marks and episodes opening in the season view come from the original since 0.2.82.
 
-// A playlist opens its items directly instead of its detail page.
+// A playlist or a collection opens its items directly instead of its detail page.
 await patch(
   "app.js",
   "return detail(item.Id, !!item.IsLiveProgram);",
-  "return item.Type === \"Playlist\" ? forkPlaylist(item) : detail(item.Id, !!item.IsLiveProgram);",
-  "Playlist opens its items",
+  "return item.Type === \"Playlist\" ? forkPlaylist(item) : item.Type === \"BoxSet\" ? listing(item.Id, item.Name) : detail(item.Id, !!item.IsLiveProgram);",
+  "Playlist and collection open their items",
 );
 // A playlist opens its items directly (no detail page and "Browse" step), loaded at once,
 // in playlist order: watchlists synced from Plex (e.g. by CrossWatch) list the newest first.
@@ -319,6 +319,37 @@ await patch(
     "        }\n" +
     "        if (grid.contains(active) && key === 38) {",
   "Series title between season tabs and episodes",
+);
+
+// Season view: no "All seasons" button (the series title does that), the subtitle choice sits
+// in the button row instead of a row of its own. Down from the buttons leads to the cast.
+await patch(
+  "app.js",
+  '    var subtitleMount = el("div", null, main),',
+  '    var subtitleMount = el("div", null, actions),',
+  "Season view: subtitles in the button row",
+);
+await patch(
+  "app.js",
+  '    if (context.seasons.length > 1) button("All seasons", function () {',
+  '    subtitleMount.className = "fork-subtitle-action";\n' +
+    "    actions.appendChild(subtitleMount);\n" +
+    '    if (false) button("All seasons", function () {',
+  "Season view: no All seasons button",
+);
+await patch(
+  "app.js",
+  "        if (actions.contains(active) && key === 38) {",
+  "        if (actions.contains(active) && key === 40 && !active.closest(\"#detail-subtitle-menu\")) {\n" +
+    '          var forkCast = main.querySelector(".cast-row");\n' +
+    "          if (forkCast) {\n" +
+    "            forkCast.castReturnFocus = active;\n" +
+    '            focusContent(forkCast.querySelector("figure"));\n' +
+    "          }\n" +
+    "          return true;\n" +
+    "        }\n" +
+    "        if (actions.contains(active) && key === 38) {",
+  "Season view: buttons down to the cast",
 );
 
 // Rewind on resume (fork/extras.js): resuming starts a few seconds before the saved position.

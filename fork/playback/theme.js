@@ -32,6 +32,8 @@
   var audio = new Audio(),
     ownerId = null, // movie or series whose theme plays (or is being looked up)
     pending = false, // theme of ownerId is being looked up
+    queued = null, // stream found while the page was still loading
+    leaveTimer = null,
     fadeTimer = null;
   audio.preload = "auto";
 
@@ -47,9 +49,19 @@
       } else audio.volume = Math.max(0, Math.min(1, next));
     }, 100);
   }
+  function start(url) {
+    queued = null;
+    audio.src = url;
+    audio.volume = 0;
+    var started = audio.play();
+    if (started && started.catch) started.catch(function () {});
+    fadeTo(VOLUME);
+  }
   function stop() {
     ownerId = null;
     pending = false;
+    queued = null;
+    clearTimeout(leaveTimer);
     if (audio.paused) return;
     fadeTo(0, function () {
       audio.pause();
@@ -83,26 +95,39 @@
         var song = (data.Items || [])[0];
         if (ownerId !== id) return;
         pending = false;
-        if (!song || !onDetailPage()) return;
-        audio.src = s.server + "/Audio/" + encodeURIComponent(song.Id) + "/stream?static=true&api_key=" + encodeURIComponent(s.token);
-        audio.volume = 0;
-        var started = audio.play();
-        if (started && started.catch) started.catch(function () {});
-        fadeTo(VOLUME);
+        if (!song) return;
+        var url = s.server + "/Audio/" + encodeURIComponent(song.Id) + "/stream?static=true&api_key=" + encodeURIComponent(s.token);
+        // The series page reports its item before it is built: start once it is shown.
+        if (onDetailPage()) start(url);
+        else queued = url;
       })
       .catch(function () {
         if (ownerId === id) pending = false;
       });
   };
 
-  function onDetailPage() {
-    var main = document.getElementById("main"),
-      player = document.getElementById("player");
-    return !!main && main.classList.contains("detail-page") && (!player || player.hidden) && !document.hidden;
+  function playerShown() {
+    var player = document.getElementById("player");
+    return (player && !player.hidden) || document.hidden;
   }
-  // Leaving the page, starting a video or hiding the app stops the music.
+  function onDetailPage() {
+    var main = document.getElementById("main");
+    return !!main && main.classList.contains("detail-page") && !playerShown();
+  }
+  // Starting a video or hiding the app stops the music at once. Leaving the page stops it unless
+  // another detail page follows shortly: the app empties the page while loading the next one,
+  // e.g. from the season view to the series page, and the music keeps playing there.
   function watch() {
-    if (ownerId && !onDetailPage()) stop();
+    if (!ownerId) return;
+    clearTimeout(leaveTimer);
+    if (playerShown()) return stop();
+    if (onDetailPage()) {
+      if (queued) start(queued);
+      return;
+    }
+    leaveTimer = setTimeout(function () {
+      if (ownerId && !onDetailPage()) stop();
+    }, 1500);
   }
   var main = document.getElementById("main"),
     player = document.getElementById("player");
