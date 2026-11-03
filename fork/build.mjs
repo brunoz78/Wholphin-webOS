@@ -47,6 +47,7 @@ await fs.copyFile(path.join(fork, "nav.js"), path.join(out, "nav.js"));
 await fs.copyFile(path.join(fork, "extras.js"), path.join(out, "extras.js"));
 await fs.copyFile(path.join(fork, "exit.js"), path.join(out, "exit.js"));
 await fs.copyFile(path.join(fork, "overview.js"), path.join(out, "overview.js"));
+await fs.copyFile(path.join(fork, "filmography.js"), path.join(out, "filmography.js"));
 await fs.copyFile(path.join(fork, "playback/theme.js"), path.join(out, "theme.js"));
 await fs.copyFile(path.join(fork, "style.css"), path.join(out, "fork.css"));
 
@@ -61,7 +62,7 @@ html = html
   .replace(
     appHook,
     '<script src="pgs.js"></script>\n    <script src="codecs.js"></script>\n    <script src="login.js"></script>\n    ' + appHook +
-      '\n    <script src="stats.js"></script>\n    <script src="nav.js"></script>\n    <script src="extras.js"></script>\n    <script src="exit.js"></script>\n    <script src="overview.js"></script>',
+      '\n    <script src="stats.js"></script>\n    <script src="nav.js"></script>\n    <script src="extras.js"></script>\n    <script src="exit.js"></script>\n    <script src="overview.js"></script>\n    <script src="filmography.js"></script>',
   )
   // Theme music must exist before the app opens its first page.
   .replace(
@@ -351,15 +352,37 @@ await patch(
     "    var section = el(\"section\", null, main);\n" +
     "    section.className = \"fork-collection-movies\";\n" +
     "    el(\"h2\", \"In your library (\" + titles.length + \")\", section);\n" +
-    "    if (!titles.length) { el(\"p\", \"No items found.\", section); return; }\n" +
-    "    var grid = cards(titles, section);\n" +
-    "    grid.classList.add(\"season-grid\", \"rail\", \"portrait\");\n" +
-    "    var restoreFrame = stack[stack.length - 1];\n" +
-    "    var restore = Array.prototype.find.call(grid.children, function (card) {\n" +
-    "      return restoreFrame && card.dataset.item === restoreFrame.focus;\n" +
-    "    });\n" +
-    "    focusContent(restore || grid.firstElementChild);\n" +
+    "    var grid = null, restoreFrame = stack[stack.length - 1], restore = null;\n" +
+    "    if (!titles.length) el(\"p\", \"No items found.\", section);\n" +
+    "    else {\n" +
+    "      grid = cards(titles, section);\n" +
+    "      grid.classList.add(\"season-grid\", \"rail\", \"portrait\");\n" +
+    "      restore = Array.prototype.find.call(grid.children, function (card) {\n" +
+    "        return restoreFrame && card.dataset.item === restoreFrame.focus;\n" +
+    "      });\n" +
+    "      focusContent(restore || grid.firstElementChild);\n" +
+    "    }\n" +
     "    main.scrollTop = 0;\n" +
+    // Full filmography from TMDB below the library titles (fork/filmography.js).
+    "    if (window.WholphinFilmography) window.WholphinFilmography({\n" +
+    "      person: full,\n" +
+    "      after: section,\n" +
+    "      grid: grid,\n" +
+    "      restore: !restore && restoreFrame && restoreFrame.focus,\n" +
+    "      valid: function () { return r === revision; },\n" +
+    "      open: function (id) {\n" +
+    "        run(function () { return go(function () { return detail(id); }); });\n" +
+    "      },\n" +
+    "      page: function (title, build) {\n" +
+    "        run(function () {\n" +
+    "          return go(function () {\n" +
+    "            var pageRevision = reset(title);\n" +
+    "            main.className = \"detail-page fork-collection-page fork-tmdb-page\";\n" +
+    "            return build(main, function () { return pageRevision === revision; });\n" +
+    "          });\n" +
+    "        });\n" +
+    "      },\n" +
+    "    });\n" +
     "  }\n" +
     "  async function seasonsPage(seriesId) {",
   "Person page",

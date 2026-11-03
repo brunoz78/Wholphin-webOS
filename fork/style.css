@@ -173,7 +173,8 @@
 }
 
 /* "Exit Wholphin?" dialog (fork/exit.js). */
-#fork-exit {
+#fork-exit,
+.fork-dialog {
   position: fixed;
   top: 0;
   left: 0;
@@ -210,6 +211,81 @@
   background: #e9ddff;
   color: #201a2a;
   box-shadow: 0 0 0 4px #a779ff;
+}
+
+/* Filmography from TMDB on the person page (fork/filmography.js), a list as in Plex:
+   year, white title, grey role, titles of the library marked in orange. */
+.fork-filmography {
+  clear: both;
+  margin-top: 24px;
+}
+.fork-credits {
+  max-width: 1400px;
+}
+.fork-credit {
+  display: flex;
+  align-items: baseline;
+  width: 100%;
+  margin: 0;
+  padding: 8px 16px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #fff;
+  font-size: 24px;
+  text-align: left;
+}
+.fork-credit:focus {
+  outline: none;
+  background: rgba(166, 122, 255, 0.28);
+  box-shadow: 0 0 0 3px #a779ff;
+}
+.fork-credit-year {
+  flex: 0 0 90px;
+  color: #a9a3b3;
+}
+.fork-credit-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.fork-credit-role {
+  color: #a9a3b3;
+}
+.fork-credit-owned {
+  flex: 0 0 auto;
+  margin-left: 24px;
+  color: #f5a623;
+  font-size: 21px;
+}
+.fork-not-owned {
+  background: rgba(255, 255, 255, 0.12);
+}
+.fork-tmdb-box {
+  max-width: 900px;
+  text-align: left;
+}
+.fork-tmdb-input {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 12px 0;
+  padding: 14px 18px;
+  border: 2px solid #71677e;
+  border-radius: 8px;
+  background: #15111c;
+  color: #fff;
+  font-size: 26px;
+  font-family: monospace;
+}
+.fork-tmdb-input:focus {
+  outline: none;
+  border-color: #a779ff;
+}
+.fork-tmdb-box .fork-exit-buttons {
+  margin-top: 16px;
+  text-align: center;
 }
 
 /* Checkboxes (e.g. "Customize Home"): the TV draws native checkboxes without a check mark,
