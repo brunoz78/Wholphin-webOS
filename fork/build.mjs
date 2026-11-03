@@ -45,6 +45,7 @@ await fs.copyFile(path.join(fork, "playback/stats.js"), path.join(out, "stats.js
 await fs.copyFile(path.join(fork, "login.js"), path.join(out, "login.js"));
 await fs.copyFile(path.join(fork, "nav.js"), path.join(out, "nav.js"));
 await fs.copyFile(path.join(fork, "extras.js"), path.join(out, "extras.js"));
+await fs.copyFile(path.join(fork, "exit.js"), path.join(out, "exit.js"));
 await fs.copyFile(path.join(fork, "playback/theme.js"), path.join(out, "theme.js"));
 await fs.copyFile(path.join(fork, "style.css"), path.join(out, "fork.css"));
 
@@ -59,7 +60,7 @@ html = html
   .replace(
     appHook,
     '<script src="pgs.js"></script>\n    <script src="codecs.js"></script>\n    <script src="login.js"></script>\n    ' + appHook +
-      '\n    <script src="stats.js"></script>\n    <script src="nav.js"></script>\n    <script src="extras.js"></script>',
+      '\n    <script src="stats.js"></script>\n    <script src="nav.js"></script>\n    <script src="extras.js"></script>\n    <script src="exit.js"></script>',
   )
   // Theme music must exist before the app opens its first page.
   .replace(
@@ -294,6 +295,93 @@ await patch(
     "  async function seasonsPage(seriesId) {",
   "Collection page",
 );
+// Cast: OK on a person opens a page as in Plex with picture, name, biography and the movies and
+// shows of the library with this person (the original does nothing).
+await patch(
+  "app.js",
+  "          figure.tabIndex = 0;",
+  "          figure.tabIndex = 0;\n" +
+    "          (function (target, who) {\n" +
+    "            target.onclick = function () {\n" +
+    "              run(function () { return go(function () { return forkPerson(who); }); });\n" +
+    "            };\n" +
+    "            target.addEventListener(\"keydown\", function (event) {\n" +
+    "              if (event.keyCode !== 13) return;\n" +
+    "              event.preventDefault();\n" +
+    "              event.stopPropagation();\n" +
+    "              target.onclick();\n" +
+    "            });\n" +
+    "          })(figure, person);",
+  "Cast opens the person",
+);
+await patch(
+  "app.js",
+  "  async function seasonsPage(seriesId) {",
+  "  async function forkPerson(person) {\n" +
+    "    var r = reset(person.Name);\n" +
+    "    var data = await Promise.all([\n" +
+    "      api(\"/Users/\" + session.user + \"/Items/\" + person.Id).catch(function () { return {}; }),\n" +
+    "      api(\"/Users/\" + session.user + \"/Items\", {\n" +
+    "        PersonIds: person.Id,\n" +
+    "        Recursive: true,\n" +
+    "        IncludeItemTypes: \"Movie,Series\",\n" +
+    "        SortBy: \"ProductionYear,SortName\",\n" +
+    "        SortOrder: \"Descending\",\n" +
+    "        Fields: \"PrimaryImageAspectRatio,ProductionYear,UserData\",\n" +
+    "      }),\n" +
+    "    ]);\n" +
+    "    if (r !== revision) return;\n" +
+    "    var full = data[0] || {}, titles = data[1].Items || [];\n" +
+    "    main.className = \"detail-page fork-collection-page fork-person-page\";\n" +
+    "    if (person.PrimaryImageTag || (full.ImageTags && full.ImageTags.Primary)) {\n" +
+    "      var picture = el(\"img\", null, null);\n" +
+    "      picture.className = \"fork-series-poster\";\n" +
+    "      picture.alt = \"\";\n" +
+    "      main.insertBefore(picture, main.firstChild);\n" +
+    "      main.classList.add(\"fork-has-poster\");\n" +
+    "      setImageSource(picture, session.server + \"/Items/\" + encodeURIComponent(person.Id) + \"/Images/Primary?maxWidth=450&quality=85\");\n" +
+    "    }\n" +
+    "    if (full.PremiereDate) {\n" +
+    "      var born = new Date(full.PremiereDate);\n" +
+    "      el(\"p\", \"Born \" + born.toLocaleDateString(window.wholphinI18n && window.wholphinI18n.lang === \"en\" ? \"en-GB\" : \"de-CH\", { day: \"numeric\", month: \"long\", year: \"numeric\" }) +\n" +
+    "        (full.ProductionLocations && full.ProductionLocations[0] ? \" · \" + full.ProductionLocations[0] : \"\"), main).className = \"metadata\";\n" +
+    "    }\n" +
+    "    if (full.Overview) el(\"p\", full.Overview, main).className = \"overview\";\n" +
+    "    var section = el(\"section\", null, main);\n" +
+    "    section.className = \"fork-collection-movies\";\n" +
+    "    el(\"h2\", \"In your library (\" + titles.length + \")\", section);\n" +
+    "    if (!titles.length) { el(\"p\", \"No items found.\", section); return; }\n" +
+    "    var grid = cards(titles, section);\n" +
+    "    grid.classList.add(\"season-grid\", \"rail\", \"portrait\");\n" +
+    "    var restoreFrame = stack[stack.length - 1];\n" +
+    "    var restore = Array.prototype.find.call(grid.children, function (card) {\n" +
+    "      return restoreFrame && card.dataset.item === restoreFrame.focus;\n" +
+    "    });\n" +
+    "    focusContent(restore || grid.firstElementChild);\n" +
+    "    main.scrollTop = 0;\n" +
+    "  }\n" +
+    "  async function seasonsPage(seriesId) {",
+  "Person page",
+);
+
+// Settings → About shows the exact release (e.g. v0.2.91.post202611031937), not only the app name.
+await patch(
+  "app.js",
+  '    var about = section("About", "Ember for Jellyfin" + (P.appVersion && P.appVersion() ? " · v" + P.appVersion() : ""));',
+  '    var about = section("About", "Wholphin for Jellyfin · " + (window.WHOLPHIN_RELEASE || (P.appVersion && P.appVersion() ? "v" + P.appVersion() : "")));',
+  "Exact release in About",
+);
+
+// Leaving the app: Back on the start page asks with an own dialog (fork/exit.js); the TV does not
+// show window.confirm, so Back did nothing.
+await patch(
+  "app.js",
+  '      if (window.confirm("Exit Ember?")) window.close();',
+  "      if (window.WholphinExit) window.WholphinExit();\n" +
+    '      else if (window.confirm("Exit Ember?")) window.close();',
+  "Exit dialog",
+);
+
 // Theme music (fork/playback/theme.js): detail pages and the season view report their item.
 await patch(
   "app.js",

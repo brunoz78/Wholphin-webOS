@@ -162,6 +162,46 @@
   color: #a9a3b3;
 }
 
+/* "Exit Wholphin?" dialog (fork/exit.js). */
+#fork-exit {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 6, 12, 0.72);
+}
+.fork-exit-box {
+  min-width: 560px;
+  padding: 40px 48px;
+  border-radius: 16px;
+  background: #211b2b;
+  border: 2px solid #71677e;
+  text-align: center;
+}
+.fork-exit-box h2 {
+  margin: 0 0 32px;
+  font-size: 36px;
+}
+.fork-exit-buttons button {
+  margin: 0 12px;
+  min-width: 200px;
+  padding: 18px 28px;
+  border: 0;
+  border-radius: 32px;
+  font-size: 26px;
+}
+.fork-exit-buttons button:focus {
+  outline: none;
+  background: #e9ddff;
+  color: #201a2a;
+  box-shadow: 0 0 0 4px #a779ff;
+}
+
 /* Checkboxes (e.g. "Customize Home"): the TV draws native checkboxes without a check mark,
    so every box looked empty. Drawn here: violet with a white check when on. */
 #main input[type="checkbox"] {
