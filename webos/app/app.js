@@ -15,6 +15,9 @@
     timer = null,
     busy = false,
     controlsTimer = null,
+    seekState = null,
+    seekCommitTimer = null,
+    seekFeedbackTimer = null,
     resumeTimer = null,
     subtitleTimer = null,
     libraryItems = [],
@@ -338,6 +341,10 @@
     if (activeGuide) activeGuide.focusChannel(playing.item.Id);
   }
   async function back() {
+    if (playing && !livePreview && !document.getElementById("seek-feedback").hidden) {
+      hideSeekFeedback();
+      return;
+    }
     var settingsMenu = document.getElementById("setting-options");
     if (settingsMenu) { settingsMenu.closeMenu(); return; }
     if (subtitleSearch && !subtitleSearch.hidden) { closeSubtitleSearch(); return; }
@@ -777,6 +784,32 @@
       },
       autoplayLabel,
     );
+    ["intro", "outro"].forEach(function (kind) {
+      var title = kind === "intro" ? "Skip intro" : "Skip outro",
+        choices = [["ask", "Show skip button"], ["auto", "Automatically"], ["off", "Off"]];
+      row(playback, title, function () {
+        return (choices.find(function (c) { return c[0] === playbackOptions()[kind]; }) || choices[0])[1];
+      }, "Uses segment timestamps supplied by your Jellyfin server.", function (control) {
+        settingChoices(title, choices, playbackOptions()[kind], function (value) {
+          var options = playbackOptions(); options[kind] = value;
+          localStorage.setItem(accountKey("playback-options"), JSON.stringify(options));
+          control.refreshSetting();
+        }, control);
+      });
+    });
+    if (P.displayMatching && P.displayMatching()) {
+      var displaySupport = P.displayMatching(), displayChoices = [["off", "Off"]];
+      if (displaySupport.rate) displayChoices.push(["rate", "Refresh rate"]);
+      if (displaySupport.resolution) displayChoices.push(["resolution", "Resolution"]);
+      if (displaySupport.rate && displaySupport.resolution) displayChoices.push(["both", "Refresh rate and resolution"]);
+      row(playback, "Match video display", function () {
+        return (displayChoices.find(function (c) { return c[0] === localStorage.getItem("ember-display-matching"); }) || displayChoices[0])[1];
+      }, "This device only. Supported display modes are requested during native playback and restored afterward. HDMI changes may briefly blank the screen.", function (control) {
+        settingChoices("Match video display", displayChoices, localStorage.getItem("ember-display-matching") || "off", function (value) {
+          localStorage.setItem("ember-display-matching", value); control.refreshSetting();
+        }, control);
+      });
+    }
     [
       [
         "countdown",
@@ -936,7 +969,8 @@
       vision.hidden = true;
     }
     row(device, "Screensaver", "", "Artwork, idle delay and clock for this profile.", function () { return go(screensaverSettings); });
-    var about = section("About", "Ember for Jellyfin · v0.2.80");
+    var about = section("About", "Ember for Jellyfin" + (P.appVersion && P.appVersion() ? " · v" + P.appVersion() : ""));
+    if (P.updateApp) row(about, "App updates", "", "Check GitHub Releases for Fire TV updates.", function () { return go(appUpdates); });
     var server = el("p", "Connected to " + session.server, about);
     server.className = "settings-description";
     row(
@@ -975,6 +1009,37 @@
     });
     categories.querySelector("button").setAttribute("aria-current", "true");
     focusContent(categories.querySelector("button"));
+  }
+  function appUpdates() {
+    reset("App updates");
+    var current = revision, active = true;
+    el("p", "Installed version: " + (P.appVersion() || "Unknown"), main);
+    var state = el("p", "Checking GitHub Releases…", main);
+    state.setAttribute("role", "status");
+    var help = el("p", "Updates come from JoeKer1/Wholphin-webOS on GitHub. Fire TV will ask you to confirm installation. Your sign-in and settings are kept.", main);
+    help.className = "settings-description";
+    var list = el("div", null, main); list.className = "screensaver-settings";
+    var check = button("Check for updates", function () { P.updateApp("check"); }, list);
+    var download = button("Download update", function () { P.updateApp("download"); }, list);
+    var install = button("Install update", function () {
+      P.updateApp(install.needsPermission ? "permission" : "install");
+    }, list);
+    download.hidden = install.hidden = true;
+    button("Back to settings", function () { active = false; return go(settings); }, list);
+    P.updateApp("check", function (data) {
+      if (!active || revision !== current) return;
+      var focused = document.activeElement;
+      state.textContent = data.message || "Choose Check for updates.";
+      check.disabled = data.state === "checking" || data.state === "downloading";
+      download.hidden = data.state !== "available";
+      download.textContent = "Download Ember " + (data.version || "update");
+      install.hidden = data.state !== "ready";
+      install.needsPermission = !data.canInstall;
+      install.textContent = data.canInstall ? "Install update" : "Allow app installs";
+      if (focused && (focused.disabled || focused.hidden) && list.contains(focused))
+        focusContent(!download.hidden ? download : !install.hidden ? install : list.querySelector("button:not(:disabled):not([hidden])"));
+    });
+    focusContent(list.querySelector("button:not(:disabled):not([hidden])"));
   }
   function screensaverOptions() {
     var saved = readPreference("screensaver", {});
@@ -1141,9 +1206,13 @@
         if (!document || !document.CustomPrefs || typeof document.CustomPrefs !== "object" || Array.isArray(document.CustomPrefs))
           throw new Error("Invalid display preferences");
         var dirty = storedLanguage(account, "language-sync-pending", {}), uploaded = {}, write = false;
-        ["subtitle-defaults", "audio-defaults"].forEach(function (suffix) {
+        ["subtitle-defaults", "audio-defaults", "seerr-connection"].forEach(function (suffix) {
           var local = storedLanguage(account, suffix, null), remote = null;
           try { remote = JSON.parse(document.CustomPrefs["ember-" + suffix]); } catch (_) {}
+          if (suffix === "seerr-connection") {
+            var legacy = storedLanguage(account, "seerr", {});
+            local = normalizedSeerrConnection(local) || normalizedSeerrConnection({server: legacy.server || localStorage.getItem("wholphin-seerr-server:" + account.server)});
+          }
           // Only accept known fields and values from other devices.
           if (remote && suffix === "subtitle-defaults" &&
               ["remember", "language", "off"].indexOf(remote.mode) >= 0 &&
@@ -1152,12 +1221,18 @@
           else if (remote && suffix === "audio-defaults" &&
               ["", "jpn", "eng", "spa", "fra", "deu", "kor", "zho"].indexOf(remote.animeLanguage) >= 0)
             remote = {animeLanguage: remote.animeLanguage};
+          else if (suffix === "seerr-connection") remote = normalizedSeerrConnection(remote);
           else remote = null;
           if (local && (dirty[suffix] || !remote)) {
             uploaded[suffix] = JSON.stringify(local);
             document.CustomPrefs["ember-" + suffix] = uploaded[suffix];
             write = true;
           } else if (remote) localStorage.setItem(languageKey(account, suffix), JSON.stringify(remote));
+          if (suffix === "seerr-connection" && (local || remote)) {
+            var connection = local && (dirty[suffix] || !remote) ? local : remote;
+            localStorage.setItem(languageKey(account, suffix), JSON.stringify(connection));
+            localStorage.setItem("wholphin-seerr-server:" + account.server, connection.server);
+          }
         });
         if (write) {
           await api("/DisplayPreferences/usersettings", query, document, "POST", options);
@@ -1676,21 +1751,80 @@
     }
     return libraryRequest;
   }
-  function seerrSettingsValue() { return readPreference("seerr", {}); }
+  function seerrSettingsValue() {
+    var saved = readPreference("seerr", {});
+    var connection = normalizedSeerrConnection(readPreference("seerr-connection", null));
+    return Object.assign({}, saved, {server: (connection && connection.server) || saved.server || localStorage.getItem("wholphin-seerr-server:" + session.server)});
+  }
+  function normalizedSeerrConnection(value) {
+    if (!value || typeof value.server !== "string" || value.server.length > 2048 || !/^https?:\/\//i.test(value.server)) return null;
+    try { return {server: seerrServer(value.server)}; } catch (_) { return null; }
+  }
   function seerrServer(value) {
     var url;
     try { url = new URL(/^https?:\/\//i.test(value.trim()) ? value.trim() : "http://" + value.trim()); }
     catch (_) { throw new Error("Enter a valid Seerr address, including its port if needed."); }
     if (["http:", "https:"].indexOf(url.protocol) < 0 || url.username || url.password || url.search || url.hash || !url.hostname) throw new Error("Enter a Seerr address, including its port if needed.");
-    return url.href.replace(/\/api\/v1\/?$/, "").replace(/\/$/, "");
+    return url.href.replace(/\/(?:api\/v1|login)\/?$/, "").replace(/\/$/, "");
   }
-  function seerrApi(path, body, server) {
-    return P.seerrRequest({server: server || seerrSettingsValue().server, profile: accountKey("seerr"), path: path, method: body ? "POST" : "GET", body: body});
+  function seerrApi(path, body, server, account) {
+    account = account || session;
+    return P.seerrRequest({server: server || seerrSettingsValue().server, profile: "wholphin-seerr:" + account.server + ":" + account.user, path: path, method: body ? "POST" : "GET", body: body});
   }
-  async function seerrSettings() {
-    var r = reset("Seerr"), account = session, saved = seerrSettingsValue();
+  async function connectSeerrProfile(server, account, valid, force) {
+    function current() {
+      if (session !== account || !valid()) throw new Error("Profile changed. Open Seerr again for the selected profile.");
+    }
+    function matches(me) {
+      return me && me.jellyfinUserId && String(me.jellyfinUserId).replace(/-/g, "").toLowerCase() === String(account.user).replace(/-/g, "").toLowerCase();
+    }
+    current();
+    if (!force) {
+      try {
+        var me = await seerrApi("/auth/me", null, server, account);
+        current();
+        if (seerrSettingsValue().auth === "local" || seerrSettingsValue().auth === "jellyfin" || matches(me)) return me;
+      } catch (error) {
+        current();
+        if (error.status !== 401 && error.status !== 403) throw error;
+      }
+    }
+    var enabled = await api("/QuickConnect/Enabled", null, null, "GET", {session: account, timeoutMs: 10000});
+    current();
+    if (enabled !== true) throw new Error("Enable Quick Connect on your Jellyfin server to connect this profile without a password.");
+    var pending = await seerrApi("/auth/jellyfin/quickconnect/initiate", {}, server, account);
+    try {
+      current();
+      if (!/^[0-9]{4,12}$/.test(pending.code) || !/^[a-f0-9]{8,128}$/i.test(pending.secret)) throw new Error("Seerr did not return a valid Quick Connect request.");
+      var connection;
+      try { connection = await api("/QuickConnect/Connect", {Secret: pending.secret}, null, "GET", {session: account, timeoutMs: 10000}); }
+      catch (error) {
+        if (error.status === 404) throw new Error("Seerr must use the same Jellyfin server as this Ember profile.");
+        throw error;
+      }
+      current();
+      if (!connection || String(connection.Code) !== String(pending.code) || connection.Authenticated) throw new Error("Seerr must use the same Jellyfin server as this Ember profile.");
+      var authorized = await api("/QuickConnect/Authorize", {Code: pending.code, UserId: account.user}, {}, "POST", {session: account, timeoutMs: 10000});
+      current();
+      if (authorized !== true) throw new Error("Jellyfin could not authorize this profile for Seerr.");
+      await seerrApi("/auth/jellyfin/quickconnect/authenticate", {secret: pending.secret}, server, account);
+      current();
+      var connected = await seerrApi("/auth/me", null, server, account);
+      current();
+      if (!matches(connected)) {
+        await seerrApi("/auth/logout", {}, server, account);
+        throw new Error("Seerr returned a different Jellyfin profile. The connection was cleared.");
+      }
+      return connected;
+    } finally { pending.secret = ""; }
+  }
+  async function seerrSettings(synced) {
+    var r = reset("Seerr"), account = session;
+    if (!synced) await syncLanguagePreferences();
+    if (r !== revision || session !== account) return;
+    var saved = seerrSettingsValue();
     main.className = "seerr-page";
-    el("p", "Discover and request movies and shows. Sign in separately for each Ember profile; your password is not saved.", main);
+    el("p", "Discover and request movies and shows using your selected Jellyfin profile. No separate Seerr password is needed.", main);
     var form = el("form", null, main); form.className = "seerr-login";
     function field(label, type, value) {
       var id = "seerr-" + type, caption = el("label", label, form), input = el("input", null, form);
@@ -1699,39 +1833,55 @@
     }
     var server = field("Seerr server address", "url", saved.server || localStorage.getItem("wholphin-seerr-server:" + session.server));
     server.placeholder = "http://your-server:5055"; server.type = "text";
-    var label = el("label", "Sign-in method", form), method = el("select", null, form);
+    var alternate = button("Use a different Seerr account", function () {
+      manual.hidden = !manual.hidden;
+      submit.textContent = manual.hidden ? "Connect with this profile" : "Sign in to Seerr";
+      alternate.setAttribute("aria-expanded", String(!manual.hidden));
+      if (!manual.hidden) focusContent(method);
+      else password.value = "";
+    }, form);
+    alternate.type = "button"; alternate.setAttribute("aria-expanded", "false");
+    var manual = el("div", null, form); manual.hidden = true;
+    var label = el("label", "Sign-in method", manual), method = el("select", null, manual);
     method.id = "seerr-method"; label.htmlFor = method.id;
     [["jellyfin", "Jellyfin account"], ["local", "Seerr local account"]].forEach(function (v) { var option = el("option", v[1], method); option.value = v[0]; });
     var username = field("Username (email for a Seerr local account)", "text", ""), password = field("Password", "password", "");
-    var submit = el("button", "Sign in to Seerr", form); submit.type = "submit";
+    [username.previousElementSibling, username, password.previousElementSibling, password].forEach(function (node) { manual.appendChild(node); });
+    var submit = el("button", "Connect with this profile", form); submit.type = "submit";
+    form.appendChild(alternate);
     var feedback = el("p", "", main); feedback.setAttribute("role", "status");
+    var syncFeedback = el("p", "The server address is shared through Jellyfin for this profile. Seerr sign-in sessions stay separate on each TV.", main);
+    syncFeedback.className = "metadata";
     form.onsubmit = async function (event) {
       event.preventDefault(); if (submit.disabled) return;
       var url, loginMethod = method.value, credentials = {password: password.value};
       password.value = "";
       try {
         url = seerrServer(server.value);
-        if (!username.value.trim()) throw new Error("Enter your username or email.");
+        if (!manual.hidden && !username.value.trim()) throw new Error("Enter your username or email.");
         credentials[loginMethod === "local" ? "email" : "username"] = username.value.trim();
-        submit.disabled = true; feedback.textContent = "Signing in…";
-        await seerrApi("/auth/" + loginMethod, credentials, url);
+        submit.disabled = true; feedback.textContent = "Connecting…";
+        if (manual.hidden) await connectSeerrProfile(url, account, function () { return r === revision; }, true);
+        else await seerrApi("/auth/" + loginMethod, credentials, url, account);
         if (r !== revision || session !== account) return;
         var me = await seerrApi("/auth/me", null, url);
         if (r !== revision || session !== account) return;
         seerrBrowseStates.delete(accountKey("seerr-browse"));
-        localStorage.setItem(accountKey("seerr"), JSON.stringify({server: url}));
+        localStorage.setItem(accountKey("seerr"), JSON.stringify({server: url, auth: manual.hidden ? "automatic" : loginMethod}));
         localStorage.setItem("wholphin-seerr-server:" + session.server, url);
+        await saveLanguagePreference("seerr-connection", {server: url});
+        if (r !== revision || session !== account) return;
         return go(seerrDiscover);
       } catch (error) { if (r === revision) feedback.textContent = error.message; }
       finally { credentials.password = ""; if (r === revision) submit.disabled = false; }
     };
     if (saved.server) {
-      button("Open Discover", function () { return go(seerrDiscover); }, main);
+      button("Open Seerr", function () { return go(seerrDiscover); }, main);
       button("Disconnect this profile from Seerr", async function () {
         await seerrApi("/auth/logout", {});
         if (session !== account || r !== revision) return;
         seerrBrowseStates.delete(accountKey("seerr-browse"));
-        localStorage.removeItem(accountKey("seerr"));
+        localStorage.setItem(accountKey("seerr"), JSON.stringify({server: saved.server, disabled: true}));
         return seerrSettings();
       }, main);
     }
@@ -1748,23 +1898,29 @@
   }
   var seerrBrowseStates = new Map();
   async function seerrDiscover() {
-    if (!seerrSettingsValue().server) return seerrSettings();
-    var r = reset("Discover"), account = session, me;
+    var r = reset("Seerr"), account = session, me;
     main.className = "seerr-page"; selectNav("seerr");
-    var feedback = el("p", "Connecting to Seerr…", main); feedback.setAttribute("role", "status");
-    try { me = await seerrApi("/auth/me"); }
+    var feedback = el("p", "Loading Seerr connection from Jellyfin…", main); feedback.setAttribute("role", "status");
+    await syncLanguagePreferences();
+    if (r !== revision || session !== account) return;
+    if (!seerrSettingsValue().server || seerrSettingsValue().disabled) return seerrSettings(true);
+    feedback.textContent = "Connecting to Seerr…";
+    try { me = await connectSeerrProfile(seerrSettingsValue().server, account, function () { return r === revision; }); }
     catch (error) {
       if (r !== revision) return;
       feedback.textContent = error.message;
+      button("Retry connection", function () { return seerrDiscover(); }, main);
       button("Seerr sign-in settings", function () { return go(seerrSettings); }, main); focusFirst(); return;
     }
     if (r !== revision || session !== account) return;
     feedback.textContent = "Signed in as " + (me.displayName || me.username || me.jellyfinUsername || "Seerr user") + ".";
-    var tabs = el("div", null, main); tabs.className = "tv-library-tabs";
+    var tabs = el("div", null, main); tabs.className = "seerr-tabs";
+    tabs.setAttribute("role", "group"); tabs.setAttribute("aria-label", "Seerr categories");
     var form = el("form", null, main); form.className = "seerr-search";
     var input = el("input", null, form); input.setAttribute("aria-label", "Search Seerr"); input.placeholder = "Search movies and shows";
     var searchButton = el("button", "Search", form); searchButton.type = "submit";
-    var results = el("section", null, main), state = 0, path = "/discover/trending", kind = null, page = 0, more = true, loading = false, grid;
+    var results = el("section", null, main), state = 0, path = "/discover/trending", kind = null, page = 0, more = true, loading = false, grid,
+      pendingGridFocus = null, lastCard = null;
     function valid() { return r === revision && session === account; }
     async function load() {
       if (!valid() || loading || !more) return;
@@ -1794,16 +1950,27 @@
         var batch = items.map(function (item) { return seerrCard(item, kind); }).filter(Boolean);
         cards(batch, results, null, grid, function (item) { return go(function () { return seerrDetail(item.seerrType, item.seerrId, me); }); });
         page = next;
+        var savedBrowse = seerrBrowseStates.get(accountKey("seerr-browse"));
+        if (savedBrowse) savedBrowse.pages = page;
         feedback.textContent = grid.children.length ? "" : "No titles found.";
         if (page === 1 && document.activeElement === searchButton && grid.firstChild) focusContent(grid.firstChild);
       } catch (error) {
         if (!valid() || current !== state) return;
         feedback.textContent = error.message;
         button("Retry loading titles", function () { return load(); }, results);
-      } finally { if (current === state) loading = false; }
+      } finally {
+        if (current === state) {
+          loading = false;
+          if (valid() && pendingGridFocus != null) {
+            focusContent(grid.children[Math.min(pendingGridFocus, grid.children.length - 1)]);
+            pendingGridFocus = null;
+          }
+        }
+      }
     }
     function browse(label, route, type) {
       state++; path = route; kind = type; page = 0; more = true; loading = false;
+      pendingGridFocus = null; lastCard = null;
       seerrBrowseStates.set(accountKey("seerr-browse"), {label: label, route: route, type: type, query: input.value});
       if (seerrBrowseStates.size > 50) seerrBrowseStates.delete(seerrBrowseStates.keys().next().value);
       results.textContent = ""; el("h2", label, results); grid = el("div", null, results); grid.className = "grid";
@@ -1816,13 +1983,66 @@
     var onScroll = function () { if (!valid()) return; if (main.scrollHeight - main.scrollTop - main.clientHeight < 700) load(); };
     main.addEventListener("scroll", onScroll);
     results.addEventListener("focusin", function (event) { var list = grid.querySelectorAll("button"), at = Array.prototype.indexOf.call(list, event.target); if (at >= Math.max(0, list.length - 6)) load(); });
-    // The handler is replaced on every Discover visit to avoid retaining detached pages.
+    // The handler is replaced on every Seerr visit to avoid retaining detached pages.
     if (main.seerrScroll) main.removeEventListener("scroll", main.seerrScroll);
     main.seerrScroll = onScroll;
+    activeListing = {
+      dispose: function () { main.removeEventListener("scroll", onScroll); },
+      closeOptions: function () { return false; },
+      scope: function () { return null; },
+      handleKey: function (key, active) {
+        var selectedTab = tabs.querySelector('[aria-pressed="true"]') || tabs.firstChild;
+        function firstCard() { return lastCard && lastCard.isConnected ? lastCard : grid.firstElementChild; }
+        if (tabs.contains(active)) {
+          var entries = Array.prototype.slice.call(tabs.children), at = entries.indexOf(active);
+          if (key === 37 && at === 0) focusContent(nav.querySelector('[data-nav="seerr"]'));
+          else if (key === 37 || key === 39) focusContent(entries[at + (key === 37 ? -1 : 1)]);
+          else if (key === 40) focusContent(input);
+          return true;
+        }
+        if (form.contains(active)) {
+          if (key === 38) focusContent(selectedTab);
+          else if (key === 40) focusContent(firstCard() || results.querySelector("button"));
+          else if (active === searchButton && key === 37) focusContent(input);
+          else if (active === input && key === 39 && !input.value) focusContent(searchButton);
+          else if (active === input && key === 37 && !input.value) focusContent(nav.querySelector('[data-nav="seerr"]'));
+          return true;
+        }
+        if (grid.contains(active)) {
+          var cards = Array.prototype.slice.call(grid.children), index = cards.indexOf(active);
+          if (index < 0) return false;
+          lastCard = active;
+          var top = cards[0].getBoundingClientRect().top,
+            columns = cards.filter(function (card) { return Math.abs(card.getBoundingClientRect().top - top) < 4; }).length || 1;
+          if (key === 37) {
+            if (index % columns === 0) focusContent(nav.querySelector('[data-nav="seerr"]'));
+            else focusContent(cards[index - 1]);
+          } else if (key === 39) {
+            if ((index + 1) % columns !== 0) focusContent(cards[index + 1]);
+          } else if (key === 38) focusContent(index < columns ? input : cards[index - columns]);
+          else if (key === 40) {
+            if (index + columns < cards.length) focusContent(cards[index + columns]);
+            else if (more) {
+              pendingGridFocus = index + columns;
+              run(load);
+            }
+          }
+          return true;
+        }
+        return false;
+      },
+    };
     var previous = seerrBrowseStates.get(accountKey("seerr-browse"));
     if (previous) input.value = previous.query || "";
     await browse(previous ? previous.label : "Trending", previous ? previous.route : "/discover/trending", previous && previous.type);
-    if (valid()) focusContent(tabs.firstChild);
+    var frame = stack[stack.length - 1], savedFocus = frame && frame.focus;
+    function restoredCard() { return Array.prototype.find.call(grid.children, function (card) { return card.dataset.item === savedFocus; }); }
+    while (valid() && savedFocus && !restoredCard() && more && previous && page < (previous.pages || 1)) {
+      var before = page;
+      await load();
+      if (page === before) break;
+    }
+    if (valid()) focusContent(restoredCard() || tabs.querySelector('[aria-pressed="true"]') || tabs.firstChild);
   }
   async function seerrDetail(type, id, me) {
     var r = reset("Loading title…"), account = session, data;
@@ -1849,12 +2069,13 @@
       var standardPending = pending;
       var quality = button("Quality: " + (is4k ? "4K" : "Standard"), function () {
         is4k = !is4k; quality.textContent = "Quality: " + (is4k ? "4K" : "Standard");
-        selected = []; renderSeasons(); submit.textContent = "Review request"; refresh();
+        selected = []; renderSeasons(); submit.textContent = requestLabel; refresh();
       }, form);
       quality.hidden = !fourKAllowed;
       quality.disabled = !(standardAllowed && fourKAllowed);
       var seasons = el("div", null, form); seasons.className = "seerr-seasons";
-      var submit = button("Review request", function () {
+      var requestLabel = type === "movie" ? "Request movie" : "Request selected seasons";
+      var submit = button(requestLabel, function () {
         if (type === "tv" && !selected.length) { feedback.textContent = "Choose at least one season."; return; }
         var summary = "Request " + (data.title || data.name) + (type === "tv" ? " · seasons " + selected.join(", ") : "") + (is4k ? " in 4K?" : "?");
         settingChoices(summary, [[false, "Cancel"], [true, "Confirm request"]], false, async function (confirmed) {
@@ -1891,7 +2112,7 @@
           var unavailable = [2, 3, 5].indexOf(is4k ? existing.status4k : existing.status) >= 0;
           var b = button((season.name || "Season " + season.seasonNumber) + (unavailable ? " · already requested or available" : ""), function () {
             var at = selected.indexOf(season.seasonNumber); if (at < 0) selected.push(season.seasonNumber); else selected.splice(at, 1);
-            b.setAttribute("aria-pressed", String(at < 0)); submit.textContent = "Review request"; refresh();
+            b.setAttribute("aria-pressed", String(at < 0)); submit.textContent = requestLabel; refresh();
           }, seasons);
           b.setAttribute("aria-pressed", String(selected.indexOf(season.seasonNumber) >= 0)); b.disabled = unavailable;
         });
@@ -1899,7 +2120,8 @@
       renderSeasons(); refresh();
       if (type === "movie" && standardPending) feedback.textContent = seerrStatus(info) + ".";
     }
-    var returnButton = button("Back to Discover", back, main); focusFirst();
+    var returnButton = button("Back to Seerr", back, main);
+    focusContent(submit && !submit.disabled ? submit : (seasons && seasons.querySelector("button:not(:disabled)")) || actions.querySelector("button") || returnButton);
   }
   async function favorites() {
     var r = reset("Favorites");
@@ -2679,9 +2901,14 @@
       var badge = el("span", "✓", art);
       badge.className = "watched-badge";
       badge.setAttribute("aria-label", "Watched");
-    } else if (data.PlayedPercentage > 0 && data.PlayedPercentage < 100) {
+    }
+    // Watched history and an in-progress rewatch can both be present.
+    var percentage = data.PlaybackPositionTicks > 0 && item.RunTimeTicks > 0
+      ? data.PlaybackPositionTicks / item.RunTimeTicks * 100
+      : data.PlayedPercentage;
+    if (percentage > 0 && percentage < 100) {
       var progress = el("div", null, art); progress.className = "card-progress";
-      el("div", null, progress).style.width = Math.min(100, data.PlayedPercentage) + "%";
+      el("div", null, progress).style.width = Math.min(100, percentage) + "%";
     }
   }
   function refreshUserData(item, data, account) {
@@ -3556,6 +3783,8 @@
     extraActions.setAttribute("aria-label", "More options");
     extraActions.hidden = true;
     button("Play from beginning", function () {
+      extraActions.hidden = true;
+      moreButton.setAttribute("aria-expanded", "false");
       if (selected) return play(selected, 0, false, false, episodeSubtitles ? episodeSubtitles.options() : {});
     }, extraActions);
     button("Add to queue", function () {
@@ -6698,7 +6927,7 @@
   }
   function playbackOptions() {
     return Object.assign(
-      { autoplay: true, countdown: 30, stillWatching: 3 },
+      { autoplay: true, countdown: 30, stillWatching: 3, intro: "ask", outro: "ask" },
       readPreference("playback-options", {}),
     );
   }
@@ -6883,8 +7112,52 @@
       });
     return active.following;
   }
+  var skipSegment = document.getElementById("skip-segment");
+  function hideSegment() {
+    skipSegment.hidden = true;
+    if (document.activeElement === skipSegment) {
+      if (document.getElementById("controls").style.opacity !== "0") document.getElementById("toggle").focus();
+      else skipSegment.blur();
+    }
+  }
+  function updateSegment() {
+    var active = playing;
+    if (!active || active.live || !active.started || video.seeking || livePreview || active.awaitingWatching ||
+        !document.getElementById("playback-panel").hidden ||
+        !document.getElementById("player-tools").hidden) { hideSegment(); return; }
+    var time = position() / 10000000, segment = (active.segments || []).find(function (s) {
+      return time >= s.start && time < s.end && s.end - time > 0.25;
+    });
+    if (!segment) { active.skippedSegments.clear(); hideSegment(); return; }
+    if (playbackOptions()[segment.type.toLowerCase()] === "off") { hideSegment(); return; }
+    // Mark before seeking: native players report the old clock until seek completion.
+    if (playbackOptions()[segment.type.toLowerCase()] === "auto" && !video.paused && !active.skippedSegments.has(segment)) {
+      skipCurrentSegment(segment); return;
+    }
+    if (!upNext.hidden || active.skippedSegments.has(segment)) { hideSegment(); return; }
+    skipSegment.segment = segment;
+    skipSegment.textContent = "Skip " + segment.type.toLowerCase() +
+      (document.getElementById("controls").style.opacity === "0" ? " · OK" : "");
+    skipSegment.style.bottom = (document.getElementById("controls").style.opacity === "0" ? 90 : document.getElementById("controls").offsetHeight + 24) + "px";
+    skipSegment.hidden = false;
+  }
+  function skipCurrentSegment(segment) {
+    var active = playing;
+    if (!active || !segment) return;
+    active.skippedSegments.add(segment);
+    clearSeekState(); hideSegment();
+    seek(segment.end - position() / 10000000, true);
+  }
+  skipSegment.onclick = function () { skipCurrentSegment(skipSegment.segment); };
   function loadPlaybackExtras(active) {
     if (active.live) return;
+    active.skippedSegments = new Set();
+    api("/MediaSegments/" + encodeURIComponent(active.item.Id), {IncludeSegmentTypes: "Intro,Outro"}, null, "GET",
+      {session: active.account, signal: active.extrasController.signal, timeoutMs: 5000}).then(function (data) {
+        if (playing !== active) return;
+        active.segments = C.mediaSegments(data, Number(active.item.RunTimeTicks) / 10000000);
+        updateSegment();
+      }).catch(function () { /* Older servers and titles without segments play normally. */ });
     if (!Array.isArray(active.item.Chapters) || !active.source.MediaStreams || (active.item.Type === "Episode" && !active.item.SeriesId)) {
       active.metadata = api(
         "/Users/" +
@@ -6959,6 +7232,7 @@
     showControls();
   }
   async function openPlaybackPanel(kind) {
+    hideSegment();
     hideUpNext();
     closePlayerTools();
     var active = playing;
@@ -7096,6 +7370,7 @@
               message("Wait for playback to start before seeking.");
               return;
             }
+            clearSeekState();
             video.currentTime = chapter.StartPositionTicks / 10000000;
             closePlaybackPanel();
             return report("/Progress");
@@ -7867,6 +8142,7 @@
       document.getElementById("end-time").textContent = "";
       if (P.playbackTracks && video.configure)
         video.configure(P.playbackTracks(selected, sourceMetadata, playing.audioIndex, playing.subtitleIndex, subtitleCues, nativeMode, { server: session.server, itemId: item.Id, token: session.token }));
+      if (P.configureDisplay) P.configureDisplay(nativeMode && !live ? localStorage.getItem("ember-display-matching") || "off" : "off");
       video.src = selected.url + (ticks ? "#t=" + ticks / 10000000 : "");
       resumeTimer = setInterval(finishResume, 250);
       video.load();
@@ -7941,6 +8217,7 @@
     if (!playing) return;
     playing.lastPositionTicks = position();
     updateUpNext();
+    updateSegment();
     renderSubtitleOverlay();
     if (playing.live) {
       var range = liveSeekWindow(),
@@ -8058,6 +8335,7 @@
       if (status.textContent === "Preparing playback…") message("");
     }
     if (!playing) return;
+    clearSeekState();
     clearInterval(timer);
     clearTimeout(controlsTimer);
     clearInterval(resumeTimer);
@@ -8069,6 +8347,7 @@
       ticks =
         options.positionTicks != null ? options.positionTicks : stopped.completedPositionTicks != null ? stopped.completedPositionTicks : position();
     hideUpNext();
+    hideSegment();
     playing = null;
     livePreview = false;
     document.body.classList.remove("live-preview");
@@ -8149,6 +8428,7 @@
       document.getElementById("player-options").focus();
   }
   document.getElementById("player-options").onclick = function () {
+    hideSegment();
     var tools = document.getElementById("player-tools");
     if (!tools.hidden) closePlayerTools();
     else {
@@ -8168,6 +8448,7 @@
   }
   function showControls() {
     if (livePreview) return;
+    hideSeekFeedback();
     var controls = document.getElementById("controls");
     controls.style.opacity = "1";
     controls.style.pointerEvents = "auto";
@@ -8205,24 +8486,61 @@
       ? { start: start, end: end }
       : null;
   }
-  function seek(seconds) {
+  function hideSeekFeedback() {
+    clearTimeout(seekFeedbackTimer);
+    document.getElementById("seek-feedback").hidden = true;
+    if (seekState) seekState.delta = 0;
+  }
+  function clearSeekState() {
+    clearTimeout(seekCommitTimer);
+    hideSeekFeedback();
+    seekState = null;
+  }
+  function seek(seconds, minimal) {
     if (!playing || !playing.started || playing.awaitingWatching) return;
     var range = liveSeekWindow();
-    if (playing.live) {
-      if (range)
-        video.currentTime = Math.max(
-          range.start + 0.1,
-          Math.min(range.end, video.currentTime + seconds),
-        );
-      return;
+    if (playing.live && !range) return;
+    var now = Date.now(),
+      previous = seekState && seekState.active === playing ? seekState : null,
+      base = previous && (previous.pending || video.seeking || now - previous.updated < 800)
+        ? previous.target : video.currentTime,
+      start = range ? range.start + 0.1 : 0,
+      end = range ? range.end : Number.isFinite(video.duration) ? video.duration : playing.item.RunTimeTicks / 10000000;
+    if (!Number.isFinite(base) || !Number.isFinite(end) || end <= start) return;
+    var target = Math.max(start, Math.min(end, base + seconds)), delta = target - base;
+    if (!delta) return;
+    var state = previous || { active: playing, sent: 0 };
+    if (!previous || now - state.updated >= 800 || Math.sign(state.delta) !== Math.sign(delta)) state.delta = 0;
+    state.delta += delta;
+    state.target = target;
+    state.updated = now;
+    state.pending = true;
+    seekState = state;
+    clearTimeout(seekCommitTimer);
+    function commit() {
+      if (playing !== state.active || seekState !== state) return;
+      state.pending = false;
+      state.sent = Date.now();
+      video.currentTime = state.target;
     }
-    var target = Math.max(0, video.currentTime + seconds);
-    if (Number.isFinite(video.duration))
-      target = Math.min(target, video.duration);
-    video.currentTime = target;
+    // Keep one logical target while native engines acknowledge seeks asynchronously.
+    // Coalesce rapid repeats instead of making the decoder restart for every key event.
+    if (!minimal || now - state.sent >= 120) commit();
+    else seekCommitTimer = setTimeout(commit, 120);
+    if (minimal) {
+      var feedback = document.getElementById("seek-feedback");
+      feedback.classList.toggle("is-backward", state.delta < 0);
+      document.getElementById("seek-seconds").textContent = String(Math.round(Math.abs(state.delta)));
+      feedback.setAttribute("aria-label", (state.delta < 0 ? "Back " : "Forward ") + Math.round(Math.abs(state.delta)) + " seconds");
+      document.querySelector("#seek-progress div").style.width = Math.max(0, Math.min(100, (target - start) / (end - start) * 100)) + "%";
+      feedback.hidden = false;
+      clearTimeout(seekFeedbackTimer);
+      seekFeedbackTimer = setTimeout(hideSeekFeedback, 800);
+    }
   }
   document.getElementById("timeline").oninput = function () {
     if (!playing || !playing.started || playing.awaitingWatching) return;
+    clearSeekState();
     if (playing.live) {
       var range = liveSeekWindow();
       if (!range) return;
@@ -8408,6 +8726,17 @@
       var panelOpen = !document.getElementById("playback-panel").hidden;
       var controlsHidden =
         document.getElementById("controls").style.opacity === "0";
+      if (!panelOpen && controlsHidden && [37, 39, 412, 417].indexOf(key) >= 0) {
+        e.preventDefault();
+        seek(key === 37 ? -10 : key === 39 ? 10 : key === 412 ? -30 : 30, true);
+        return;
+      }
+      if (!panelOpen && controlsHidden && key === 13 && !skipSegment.hidden) {
+        e.preventDefault(); skipCurrentSegment(skipSegment.segment); return;
+      }
+      if (document.activeElement === skipSegment && key >= 37 && key <= 40) {
+        e.preventDefault(); showControls(); document.getElementById("toggle").focus(); return;
+      }
       showControls();
       if (
         !panelOpen &&
@@ -8416,12 +8745,6 @@
       ) {
         e.preventDefault();
         seek(key === 37 ? -10 : 10);
-        return;
-      }
-      if (controlsHidden && (key === 37 || key === 39)) {
-        e.preventDefault();
-        seek(key === 37 ? -10 : 10);
-        document.getElementById("timeline").focus();
         return;
       }
       if (controlsHidden && key === 13) {
@@ -8497,6 +8820,7 @@
             )
           ].focus();
         else if (key === 38) document.getElementById("timeline").focus();
+        else if (!skipSegment.hidden) skipSegment.focus();
         else if (!tools.hidden)
           tools.querySelector("button:not(:disabled)").focus();
         else document.getElementById("player-options").focus();

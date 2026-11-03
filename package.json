@@ -1,6 +1,6 @@
 {
   "name": "ember-tv",
-  "version": "0.2.82",
+  "version": "0.2.91",
   "private": true,
   "scripts": {
     "build:webos": "node tools/build.mjs webos",
@@ -17,10 +17,14 @@
     "test:subtitle-defaults": "npm run build && node test/subtitle-defaults-browser.cjs",
     "test:anime-audio": "npm run build && node test/anime-audio-browser.cjs",
     "test:language-sync": "npm run build && node test/language-sync-browser.cjs",
-    "test:seerr": "npm run build && node test/seerr-browser.cjs",
+    "test:seerr": "npm run build && node test/seerr-sync-browser.cjs && node test/seerr-profile-browser.cjs && node test/seerr-browser.cjs && node test/seerr-remote-browser.cjs",
     "test:subtitle-retry": "npm run build && node test/subtitle-retry-browser.cjs",
     "test:completion": "npm run build && node test/completion-browser.cjs",
-    "test:episode-entry": "npm run build && node test/episode-entry-browser.cjs"
+    "test:episode-entry": "npm run build && node test/episode-entry-browser.cjs",
+    "test:rewatch": "npm run build && node test/rewatch-browser.cjs",
+    "test:updater": "npm run build && node test/updater-browser.cjs",
+    "test:segments": "npm run build && node test/segments-browser.cjs",
+    "test:seeking": "npm run build && node test/seeking-browser.cjs"
   },
   "devDependencies": {
     "@babel/core": "^7.28.0",

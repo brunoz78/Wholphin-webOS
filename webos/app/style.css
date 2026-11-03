@@ -531,6 +531,16 @@ body:not(.signed-in) main {
   font-size: 28px;
   margin: 0 0 16px;
 }
+#seek-feedback { position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 2; pointer-events: none; color: #fff; }
+#seek-indicator { position: absolute; bottom: 130px; left: 50%; width: 100px; height: 100px; margin-left: -50px; filter: drop-shadow(0 2px 3px #000); }
+#seek-indicator img { width: 100%; height: 100%; animation: seek-forward 800ms linear infinite; }
+#seek-feedback.is-backward #seek-indicator img { animation-name: seek-backward; }
+#seek-seconds { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: flex; align-items: center; justify-content: center; font-size: 26px; }
+#seek-progress { position: absolute; bottom: 0; left: 0; right: 0; height: 4px; background: rgba(255,255,255,.3); }
+#seek-progress div { height: 100%; background: #a67aff; }
+@keyframes seek-forward { from { transform: rotate(0deg); } to { transform: rotate(270deg); } }
+@keyframes seek-backward { from { transform: scaleX(-1) rotate(0deg); } to { transform: scaleX(-1) rotate(270deg); } }
+@media (prefers-reduced-motion: reduce) { #seek-indicator img { animation: none; } #seek-feedback.is-backward #seek-indicator img { transform: scaleX(-1); } }
 #controls button {
   margin-right: 16px;
 }
@@ -1340,11 +1350,11 @@ body:not(.signed-in) main {
   overflow: hidden;
 }
 
-.tv-library-tabs {
+.tv-library-tabs, .seerr-tabs {
   display: flex;
   margin: 0 8px 24px;
 }
-.tv-library-tabs button {
+.tv-library-tabs button, .seerr-tabs button {
   background: transparent;
   border-radius: 0;
   border: 0;
@@ -1354,11 +1364,11 @@ body:not(.signed-in) main {
   color: #c1b8cd;
   font-size: 27px;
 }
-.tv-library-tabs button[aria-selected="true"] {
+.tv-library-tabs button[aria-selected="true"], .seerr-tabs button[aria-pressed="true"] {
   color: #fff;
   border-bottom-color: #a67aff;
 }
-.tv-library-tabs button:focus {
+.tv-library-tabs button:focus, .seerr-tabs button:focus {
   outline: 3px solid #a67aff;
 }
 .tv-recommended > h1 {
@@ -2256,3 +2266,9 @@ main.home-editor-page { display: flex; flex-direction: column; overflow: hidden;
 .seerr-seasons button[aria-pressed="true"]::after { content: "✓"; position: absolute; right: 22px; }
 
 .watched-badge { position: absolute; top: 10px; left: 10px; min-width: 30px; height: 30px; padding: 0 5px; border-radius: 5px; background: #276447; color: #fff; font-size: 24px; line-height: 30px; text-align: center; }
+
+/* Separate from transport controls so skipping never obscures the video. */
+#skip-segment { position: absolute; right: 64px; bottom: 340px; z-index: 12;
+  padding: 16px 28px; color: #fff; background: #17191f; border: 2px solid #fff;
+  border-radius: 8px; font-size: 24px; }
+#skip-segment:focus { color: #17191f; background: #fff; outline: 3px solid #fff; outline-offset: 4px; }

@@ -1,11 +1,12 @@
 (function (root) {
   "use strict";
-  var receive = function () {};
+  var receive = function () {}, updateListener = function () {};
   function command(action, values) {
     root.EmberAndroid.command(JSON.stringify(Object.assign({ action: action }, values || {})));
   }
   var seerrJobs = {}, seerrId = 0;
   root.EmberFireTV = {
+    updateResult: function (data) { updateListener(data); },
     seerrResult: function (result) {
       var job = seerrJobs[result.id];
       if (!job) return;
@@ -55,6 +56,11 @@
       });
   }
   root.EmberPlatform = {
+    appVersion: function () { try { return root.EmberAndroid.appVersion(); } catch (_) { return ""; } },
+    updateApp: function (action, callback) {
+      if (callback) updateListener = callback;
+      root.EmberAndroid.updateCommand(action);
+    },
     seerrRequest: function (values) {
       return new Promise(function (resolve, reject) {
         var id = ++seerrId;
@@ -62,6 +68,11 @@
         try { root.EmberAndroid.seerrRequest(JSON.stringify(Object.assign({id: id}, values))); }
         catch (_) { clearTimeout(seerrJobs[id].timer); delete seerrJobs[id]; reject(new Error("Update the Fire TV app to connect to Seerr.")); }
       });
+    },
+    displayMatching: function () { var modes = capabilities().displayMatching; return modes && (modes.rate || modes.resolution) ? modes : null; },
+    configureDisplay: function (mode) {
+      // Optional bridge capability must never prevent playback in older wrappers.
+      try { command("displayPreferences", {mode: mode}); } catch (_) {}
     },
     loadImage: loadImage,
     nativeSubtitle: function (source, index) { return root.EmberFirePlayback.nativeSubtitle(source, index); },
