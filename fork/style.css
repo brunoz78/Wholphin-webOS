@@ -127,7 +127,8 @@
   background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cpath%20fill%3D%22%23201a2a%22%20d%3D%22M19%204H5c-1.11%200-2%20.9-2%202v12c0%201.1.89%202%202%202h14c1.1%200%202-.9%202-2V6c0-1.1-.9-2-2-2zm-8%207H9.5v-.5h-2v3h2V13H11v1c0%20.55-.45%201-1%201H7c-.55%200-1-.45-1-1v-4c0-.55.45-1%201-1h3c.55%200%201%20.45%201%201v1zm7%200h-1.5v-.5h-2v3h2V13H18v1c0%20.55-.45%201-1%201h-3c-.55%200-1-.45-1-1v-4c0-.55.45-1%201-1h3c.55%200%201%20.45%201%201v1z%22/%3E%3C/svg%3E");
   color: #201a2a;
 }
-.fork-subtitle-action #detail-subtitles::after {
+/* Everywhere (also on movie pages): the TV font has no "▾". */
+#detail-subtitles::after {
   content: "";
   position: absolute;
   right: 24px;
@@ -139,8 +140,9 @@
   border-bottom: 3px solid currentColor;
   transform: rotate(45deg);
 }
-.fork-subtitle-action #detail-subtitles {
+#detail-subtitles {
   position: relative;
+  padding-right: 52px;
 }
 .fork-subtitle-action #detail-subtitle-menu {
   position: absolute;

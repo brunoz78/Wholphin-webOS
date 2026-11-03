@@ -188,8 +188,11 @@
 
   // Information page of a title that is not in the library.
   function infoPage(page, valid, credit) {
-    var status = el("p", "metadata", t("Loading from TMDB…", "Wird von TMDB geladen …"), page);
-    page.setAttribute("data-no-i18n", "");
+    // TMDB texts arrive in the chosen language; the page itself (the app's main area) must stay
+    // translatable, so only the own elements are marked.
+    var box = el("div", "fork-tmdb-info", null, page);
+    box.setAttribute("data-no-i18n", "");
+    var status = el("p", "metadata", t("Loading from TMDB…", "Wird von TMDB geladen …"), box);
     return tmdb("/" + credit.media_type + "/" + encodeURIComponent(credit.id)).then(
       function (item) {
         if (!valid()) return;
@@ -207,11 +210,11 @@
         if (item.runtime) facts.push(item.runtime + " " + t("min", "Min."));
         if (item.number_of_seasons) facts.push(item.number_of_seasons + " " + (item.number_of_seasons === 1 ? t("season", "Staffel") : t("seasons", "Staffeln")));
         if (item.vote_average) facts.push(item.vote_average.toFixed(1) + " ★");
-        if (facts.length) el("p", "metadata", facts.join(" · "), page);
+        if (facts.length) el("p", "metadata", facts.join(" · "), box);
         if (item.genres && item.genres.length)
-          el("p", "genres", item.genres.map(function (g) { return g.name; }).join(", "), page);
-        if (item.overview) el("p", "overview", item.overview, page);
-        var note = el("div", "actions", null, page),
+          el("p", "genres", item.genres.map(function (g) { return g.name; }).join(", "), box);
+        if (item.overview) el("p", "overview", item.overview, box);
+        var note = el("div", "actions", null, box),
           missing = el("button", "fork-not-owned", t("Not in your library", "Nicht in deiner Mediathek"), note);
         missing.focus();
       },
