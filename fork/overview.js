@@ -50,6 +50,10 @@
         text.parentNode.insertBefore(actions, text.nextSibling);
       }
       actions.appendChild(more);
+      // A person page starts on "More" (the biography) instead of the first movie below it.
+      var active = document.activeElement;
+      if (main.classList.contains("fork-person-page") && active && active.closest(".season-grid") && active === active.parentNode.firstElementChild)
+        more.focus();
     }
     more.textContent = open ? t("Less", "Weniger") : t("More", "Mehr");
   }
