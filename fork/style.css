@@ -71,6 +71,22 @@
   grid-row: 3;
 }
 
+/* Series title in the season view, a link to the series page. */
+.season-browser h1 .fork-series-link {
+  margin: 0;
+  padding: 0 12px;
+  margin-left: -12px;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.season-browser h1 .fork-series-link:focus {
+  border-color: #a67aff;
+  background: rgba(166, 122, 255, 0.18);
+}
+
 /* Live playback overlay (key 0 during playback). */
 #fork-stats {
   position: absolute;

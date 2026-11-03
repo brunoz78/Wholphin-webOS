@@ -207,6 +207,44 @@ await patch(
   "Setting titles for recaps and previews",
 );
 
+// Season view: the series title opens the series page with all seasons and their posters,
+// as in Plex. Reachable with the remote from the season tabs (down) or the episodes (up).
+await patch(
+  "app.js",
+  "    heading.textContent = context.title;",
+  "    heading.textContent = \"\";\n" +
+    "    var forkSeries = button(context.title, function () {\n" +
+    "      return go(function () { return detail(context.seriesId); });\n" +
+    "    }, heading);\n" +
+    "    forkSeries.className = \"fork-series-link\";\n" +
+    "    forkSeries.setAttribute(\"data-no-i18n\", \"\");",
+  "Series title opens the series page",
+);
+await patch(
+  "app.js",
+  "          else if (key === 40) focusContent(Array.prototype.find.call(grid.children, function (card) {",
+  "          else if (key === 40 && forkSeries) focusContent(forkSeries);\n" +
+    "          else if (key === 40) focusContent(Array.prototype.find.call(grid.children, function (card) {",
+  "Season tabs down to the series title",
+);
+await patch(
+  "app.js",
+  "        if (grid.contains(active) && key === 38) {",
+  "        if (active === forkSeries && (key === 38 || key === 40)) {\n" +
+    "          if (key === 38) focusContent(tabs.querySelector('[aria-selected=\"true\"]'));\n" +
+    "          else focusContent(Array.prototype.find.call(grid.children, function (card) {\n" +
+    "            return selected && card.dataset.item === selected.Id;\n" +
+    "          }) || grid.querySelector(\".card\"));\n" +
+    "          return true;\n" +
+    "        }\n" +
+    "        if (grid.contains(active) && key === 38 && forkSeries) {\n" +
+    "          focusContent(forkSeries);\n" +
+    "          return true;\n" +
+    "        }\n" +
+    "        if (grid.contains(active) && key === 38) {",
+  "Series title between season tabs and episodes",
+);
+
 // Rewind on resume (fork/extras.js): resuming starts a few seconds before the saved position.
 await patch(
   "app.js",
