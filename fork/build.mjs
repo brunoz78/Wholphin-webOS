@@ -50,6 +50,7 @@ await fs.copyFile(path.join(fork, "exit.js"), path.join(out, "exit.js"));
 await fs.copyFile(path.join(fork, "overview.js"), path.join(out, "overview.js"));
 await fs.copyFile(path.join(fork, "filmography.js"), path.join(out, "filmography.js"));
 await fs.copyFile(path.join(fork, "plex.js"), path.join(out, "plex.js"));
+await fs.copyFile(path.join(fork, "continue.js"), path.join(out, "continue.js"));
 await fs.copyFile(path.join(fork, "playback/theme.js"), path.join(out, "theme.js"));
 await fs.copyFile(path.join(fork, "style.css"), path.join(out, "fork.css"));
 
@@ -64,7 +65,7 @@ html = html
   .replace(
     appHook,
     '<script src="pgs.js"></script>\n    <script src="codecs.js"></script>\n    <script src="login.js"></script>\n    ' + appHook +
-      '\n    <script src="stats.js"></script>\n    <script src="dialog.js"></script>\n    <script src="nav.js"></script>\n    <script src="extras.js"></script>\n    <script src="exit.js"></script>\n    <script src="overview.js"></script>\n    <script src="filmography.js"></script>\n    <script src="plex.js"></script>',
+      '\n    <script src="stats.js"></script>\n    <script src="dialog.js"></script>\n    <script src="nav.js"></script>\n    <script src="extras.js"></script>\n    <script src="exit.js"></script>\n    <script src="overview.js"></script>\n    <script src="filmography.js"></script>\n    <script src="plex.js"></script>\n    <script src="continue.js"></script>',
   )
   // Theme music must exist before the app opens its first page.
   .replace(
@@ -356,6 +357,34 @@ await patch(
     "        setTimeout(stop, 3000);\n" +
     "      })(stack[stack.length - 1]);",
   "Back from a person focuses that person",
+);
+// "Continue watching" on the home page: titles removed by hand or not watched for the chosen
+// number of days drop out (fork/continue.js).
+await patch(
+  "app.js",
+  "        EnableResumable: row.parent ? false : undefined,",
+  "        EnableResumable: row.parent ? false : undefined,\n" +
+    "        NextUpDateCutoff: window.WholphinContinue ? window.WholphinContinue.cutoff() : undefined,",
+  "Continue watching: next up date limit",
+);
+await patch(
+  "app.js",
+  "    if (row.kind === \"resume\") return C.combineResume(await resume(), []);",
+  "    function forkContinue(items) { return window.WholphinContinue ? window.WholphinContinue.filter(items) : items; }\n" +
+    "    if (row.kind === \"resume\") return C.combineResume(forkContinue(await resume()), []);",
+  "Continue watching: resume filter",
+);
+await patch(
+  "app.js",
+  "    if (row.kind === \"next\") return next();",
+  "    if (row.kind === \"next\") return forkContinue(await next());",
+  "Continue watching: next up filter",
+);
+await patch(
+  "app.js",
+  "      var both = await Promise.all([resume(), next()]);",
+  "      var both = (await Promise.all([resume(), next()])).map(forkContinue);",
+  "Continue watching: combined filter",
 );
 await patch(
   "app.js",
