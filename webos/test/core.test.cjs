@@ -1,6 +1,65 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const C = require("../app/core.js");
+test("trickplay uses the selected version and a bounded thumbnail sheet size", () => {
+  const info = {Width: 320, Height: 180, TileWidth: 10, TileHeight: 10, ThumbnailCount: 725, Interval: 10000};
+  const item = {Trickplay: {"ab-cd": {320: info, 640: {...info, Width: 640}}}};
+  assert.equal(C.trickplayInfo(item, "ABCD").Width, 320);
+  assert.equal(C.trickplayInfo(item, "other"), null);
+  assert.equal(C.trickplayInfo({Trickplay: {source: {320: {...info, Interval: 0}}}}, "source"), null);
+  assert.equal(C.trickplayInfo({Trickplay: {source: {640: {...info, Width: 640}}}}, "source"), null, "Oversized sheets are not decoded on TV hardware");
+  assert.equal(C.trickplayInfo({}, "source"), null);
+});
+test("trickplay frames cross rows and sheets, clamp before zero and at the last thumbnail", () => {
+  const info = {Width: 160, Height: 90, TileWidth: 2, TileHeight: 2, ThumbnailCount: 9, Interval: 10000};
+  assert.deepEqual(C.trickplayFrame(info, 35), {sheet: 0, x: 160, y: 90, width: 160, height: 90});
+  assert.deepEqual(C.trickplayFrame(info, 40), {sheet: 1, x: 0, y: 0, width: 160, height: 90});
+  assert.equal(C.trickplayFrame(info, -1).sheet, 0);
+  assert.equal(C.trickplayFrame(info, 999).sheet, 2);
+  assert.equal(C.trickplayFrame(info, NaN), null);
+});
+test("held seeking speeds up in bounded stages while normal taps retain their step", () => {
+  assert.equal(C.heldSeekStep(10, 0), 10);
+  assert.equal(C.heldSeekStep(10, 1199), 10);
+  assert.equal(C.heldSeekStep(10, 1200), 30);
+  assert.equal(C.heldSeekStep(10, 3000), 60);
+  assert.equal(C.heldSeekStep(30, 1200), 60);
+  assert.equal(C.heldSeekStep(30, 100000), 120);
+});
+test("Seerr request permissions distinguish media types and standard versus 4K", () => {
+  assert.deepEqual(C.seerrPermissions(2, "tv"), {standard: true, fourK: true});
+  assert.deepEqual(C.seerrPermissions(262144, "movie"), {standard: true, fourK: false});
+  assert.deepEqual(C.seerrPermissions(262144, "tv"), {standard: false, fourK: false});
+  assert.deepEqual(C.seerrPermissions(4096, "tv"), {standard: false, fourK: true});
+  assert.deepEqual(C.seerrPermissions(4096, "movie"), {standard: false, fourK: false});
+  assert.deepEqual(C.seerrPermissions(16, "tv"), {standard: false, fourK: false}, "Managing requests alone does not grant request permission");
+  assert.deepEqual(C.seerrPermissions(undefined, "movie"), {standard: false, fourK: false});
+});
+test("series choices prefer the season, match reordered tracks, and merge across devices", () => {
+  const a = {reset: 0, entries: {"series:show": {Audio: {value: {language: "jpn"}, updated: 10}}}};
+  const b = {reset: 0, entries: {"season:s1": {Audio: {value: {language: "eng"}, updated: 20}, Subtitle: {value: {off: true}, updated: 21}}}};
+  const data = C.mergeSeriesTracks(a, b), item = {Type: "Episode", SeriesId: "show", SeasonId: "s1"};
+  assert.equal(C.seriesTrack(item, "Audio", data).language, "en");
+  assert.equal(C.seriesTrack({...item, SeasonId: "s2"}, "Audio", data).language, "ja");
+  assert.equal(C.seriesTrack({Type: "Movie", Id: "movie"}, "Audio", data), null);
+  assert.equal(C.seriesTrack({...item, SeriesId: "other", SeasonId: "other-season"}, "Audio", data), null);
+  assert.equal(C.preferredTrack({}, "Subtitle", C.seriesTrack(item, "Subtitle", data)), -1);
+  assert.deepEqual(C.trackScopes({Type: "Episode", SeriesId: "show"}), ["series:show"]);
+  assert.equal(C.preferredTrack({MediaStreams: [{Type: "Audio", Index: 8, Language: "jpn"}]}, "Audio", C.seriesTrack({...item, SeasonId: "s2"}, "Audio", data)), 8);
+  const reset = C.mergeSeriesTracks(data, {reset: 30, entries: {}});
+  assert.deepEqual(reset.entries, {});
+  assert.deepEqual(C.mergeSeriesTracks(reset, a), reset, "Offline devices cannot resurrect reset choices");
+  assert.deepEqual(C.mergeSeriesTracks({entries: {"series:bad": {Audio: {value: {language: "javascript:bad"}, updated: 100}}}}, reset), reset);
+});
+test("artwork cache tags belong to the actual image owner and are URL encoded", () => {
+  const episode = {Id: "episode", SeriesId: "show", ImageTags: {Primary: "still"}, SeriesPrimaryImageTag: "poster-new", ParentLogoItemId: "show", ParentLogoImageTag: "logo&new", ParentBackdropItemId: "show", ParentBackdropImageTags: ["background-new"]};
+  assert.equal(C.imageTagQuery(episode, "Primary", "episode"), "&tag=still");
+  assert.equal(C.imageTagQuery(episode, "Primary", "show"), "&tag=poster-new");
+  assert.equal(C.imageTagQuery(episode, "Logo", "show"), "&tag=logo%26new");
+  assert.equal(C.imageTagQuery(episode, "Backdrop", "show"), "&tag=background-new");
+  assert.equal(C.imageTagQuery(episode, "Thumb", "episode"), "");
+  assert.equal(C.imageTagQuery(episode, "Primary", "other"), "");
+});
 test("normalizes server base paths and rejects unsafe URLs", () => {
   assert.equal(
     C.serverUrl(" https://media.example/jellyfin/ "),
@@ -558,6 +617,7 @@ test("library rendering stays bounded for very large continuous libraries", () =
 test("C1 native profile bounds 4K HEVC/HDR10 and Dolby audio without DTS/TrueHD", () => {
   const p = C.profile({ native: true });
   assert.equal(p.MaxStreamingBitrate, 60000000);
+  assert.equal(p.DirectPlayProfiles[0].Container, "mp4,m4v,mkv");
   assert.equal(p.DirectPlayProfiles[0].VideoCodec, "h264,hevc");
   assert.equal(p.DirectPlayProfiles[0].AudioCodec, "aac,mp3,ac3,eac3");
   assert.ok(!JSON.stringify(p).includes("truehd"));
@@ -611,7 +671,7 @@ test("C1 native profile bounds 4K HEVC/HDR10 and Dolby audio without DTS/TrueHD"
   assert.equal(
     C.profile().MaxStreamingBitrate,
     20000000,
-    "Compatibility remains the default",
+    "The shared baseline remains available for other platforms and explicit Compatibility",
   );
 });
 test("native policy requires compatible Dolby Vision MP4 and falls back for burn-in", () => {

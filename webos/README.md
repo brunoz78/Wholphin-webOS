@@ -349,3 +349,38 @@ The Fire TV build supports direct Seerr sign-in with Jellyfin or Seerr-local cre
 Discover provides trending titles, movies, TV, upcoming movies, search and My requests, with additional results loaded as you browse. Movie and season requests require confirmation and respect Seerr permissions/quotas; 4K is offered when allowed. Available titles can open their Jellyfin detail page when Seerr supplies a Jellyfin item ID.
 
 Native HTTP handles cookies and CSRF. Cookies are stored in Android app-private storage, scoped to the Ember profile, Jellyfin server and Seerr URL; passwords are not saved. Cookie expiry is respected and disconnect clears the current profile’s saved session. LG and Samsung do not show this Fire TV-only integration.
+
+
+## Show preferences, artwork and playback quality (v0.2.95)
+
+Manual episode audio/subtitle choices now apply to the current season and series for the selected profile. Episode-specific subtitle choices take priority, followed by season and series choices, then general language defaults (including Anime). Matching uses language and track role/accessibility flags instead of reusing stream indices. Show choices sync through Jellyfin DisplayPreferences when opening the profile or Settings and after a manual selection; offline changes retry later. This does not provide live push updates to another TV already playing. Reset track preferences clears the synced show choices for this profile as well as this device's remembered title choices.
+
+During on-demand playback, open **Options → Quality** to choose Automatic or a maximum bitrate. Lower limits may require server video conversion. Position, pause state, audio and subtitles are retained; the limit remains through track changes but resets for the next video. Automatic restores the device's normal playback policy rather than guaranteeing Direct Play. Live TV quality switching is not supported.
+
+Poster, backdrop, logo and screensaver image URLs include Jellyfin's image tags when available, allowing changed server artwork to replace cached images. This affects media artwork, not the TV launcher's application icon cache.
+
+These changes have browser-fixture coverage across LG, Samsung and Fire TV, including native Fire TV negotiation and LG direct-play regressions. Physical-device validation of v0.2.95 is pending.
+
+
+## System controls, HDR overrides and folder preferences (v0.2.96)
+
+Fire TV registers a native Android MediaSession while playback is active in the foreground. Supported transport commands pass through Ember's existing playback/reporting flow: play, pause, seek, next/previous when available, and stop. The session publishes title, episode name and timing without stream URLs or credentials, ignores commands for replaced playback generations, deactivates in the background or at the end, and releases when the player closes. Amazon's media-session voice-control permission is included. This is transport integration, not voice search of the Jellyfin catalog; actual Alexa behavior still needs device testing.
+
+Fire TV **Settings → Device → HDR formats** offers Automatic or Disabled for HDR10, HDR10+, HLG and Dolby Vision (including its HDR10 base-layer fallback). Defaults preserve detected support. Overrides are device-local, apply to all profiles starting with the next video, and never force-enable unsupported formats. Diagnostics show reported display HDR formats, Dolby Vision decoder presence and the native selected format/transfer where available. Selected-format metadata does not confirm the display's active HDR mode. Dolby Vision profile 7 conversion is not included.
+
+Nested general-library folders inherit the parent's sort and watch-status preferences unless they have explicit saved choices. Genre and year filters stay with the original folder. These preferences remain separate per profile; the existing fixed grid layout is unchanged.
+
+Seerr refreshes permissions when opening a title and before submitting a confirmed request, explains Standard/4K access, and provides a refresh action. The native transport distinguishes expired sessions, quota limits, blocked titles, duplicate requests and rate limits using fixed messages rather than displaying raw server responses. Request permission remains enforced by Seerr.
+
+Validation includes 55 unit tests, native Java compilation, cross-platform menu/folder/quality fixtures, Fire TV transport/HDR fixtures, Seerr request/revocation flows and native local-HTTP transport/error classification. Physical-device validation is pending; no TV was updated while preparing this release.
+
+
+## Seek previews and held remote seeking (v0.2.97)
+
+On-demand movies and episodes show a timestamp and scene preview when Jellyfin has generated Trickplay thumbnails for the selected media version. Previews work with hidden-control remote seeking, the timeline and transport seek buttons. Ember reads Jellyfin's manifest, selects a bounded thumbnail size, and crops the appropriate frame from an authenticated sprite-sheet request. Only the requested sheet loads; at most two decoded sheets are cached for the active playback. No video decoding or thumbnail generation is requested by this feature.
+
+If metadata or images are missing, denied, invalid, oversized or unavailable, the existing seek feedback and timestamp remain. Thumbnails from a different media version are not substituted. Image requests use the captured playback profile's authorization header, reject redirects, and are cancelled when playback closes. Stop, source changes and late image responses cannot leave old preview scenes on the new video. Live TV does not load Trickplay images.
+
+Holding left/right speeds up from 10 to 30 to 60 seconds per accepted repeat, with repeat throttling and existing native seek coalescing. Releasing, changing direction or switching playback resets acceleration. Media seek keys use 30/60/120-second stages. Live seeking keeps its normal step. Paused playback stays paused. Fire TV's forwarded media keys include repeat/release events; native D-pad handling is retained for normal text input and navigation.
+
+Validation: 59 unit tests; cross-platform browser fixtures for sprite cropping, sheet reuse/transitions, selected-version matching, authenticated/redirect-safe requests, older fetch fallback, bad/oversized images, delayed-response races, cancellation, timestamp/timeline previews and hold/release acceleration; existing seek/menu regressions. Physical-device validation is pending.

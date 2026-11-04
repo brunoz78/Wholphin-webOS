@@ -135,11 +135,11 @@
         IsRequired: required !== false,
       };
     }
-    base.Name = "LG C1 native (experimental)";
+    base.Name = "LG C1 native";
     base.MaxStreamingBitrate = 60000000;
     base.DirectPlayProfiles = [
       {
-        Container: "mp4,m4v",
+        Container: "mp4,m4v,mkv",
         Type: "Video",
         VideoCodec: "h264,hevc",
         AudioCodec: "aac,mp3,ac3,eac3",
@@ -607,6 +607,90 @@
     return (item.Genres || []).some(function (g) { return /^anime$/i.test(g); }) ||
       ids.indexOf(item.ParentId) >= 0 ||
       (ancestors || []).some(function (a) { return ids.indexOf(a.Id) >= 0 || (a.Type === "CollectionFolder" && /\banime\b/i.test(a.Name || "")); });
+  }
+  function trackScopes(item) {
+    if (!item || item.Type !== "Episode" || !item.SeriesId) return [];
+    var season = item.SeasonId || item.ParentId;
+    return (season ? ["season:" + season] : []).concat("series:" + item.SeriesId);
+  }
+  function seerrPermissions(value, type) {
+    var permissions = Number(value) || 0;
+    return {
+      standard: !!(permissions & (2 | 32 | (type === "movie" ? 262144 : 524288))),
+      fourK: !!(permissions & (2 | 1024 | (type === "movie" ? 2048 : 4096))),
+    };
+  }
+  function trickplayInfo(item, sourceId) {
+    function canonical(id) { return String(id || "").replace(/-/g, "").toLowerCase(); }
+    var manifest = item && item.Trickplay;
+    if (!manifest || !sourceId) return null;
+    var key = Object.keys(manifest).find(function (id) { return canonical(id) === canonical(sourceId); });
+    if (!key) return null; // Never substitute another version's thumbnails.
+    var choices = Object.keys(manifest[key] || {}).map(function (width) { return manifest[key][width]; }).filter(function (info) {
+      return info && [info.Width, info.Height, info.TileWidth, info.TileHeight, info.ThumbnailCount, info.Interval].every(function (n) { return Number.isInteger(n) && n > 0; }) &&
+        info.Width <= 640 && info.Height <= 640 && info.TileWidth * info.Width <= 4096 && info.TileHeight * info.Height <= 4096 &&
+        info.TileWidth * info.Width * info.TileHeight * info.Height <= 8388608 &&
+        info.ThumbnailCount <= 1000000 && info.Interval >= 100;
+    });
+    choices.sort(function (a, b) { return Math.abs(a.Width - 320) - Math.abs(b.Width - 320) || a.Width - b.Width; });
+    return choices.length ? Object.assign({}, choices[0], {sourceId: key}) : null;
+  }
+  function trickplayFrame(info, seconds) {
+    if (!info || !Number.isFinite(seconds)) return null;
+    var index = Math.max(0, Math.min(info.ThumbnailCount - 1, Math.floor(seconds * 1000 / info.Interval))),
+      perSheet = info.TileWidth * info.TileHeight, tile = index % perSheet;
+    return {sheet: Math.floor(index / perSheet), x: tile % info.TileWidth * info.Width,
+      y: Math.floor(tile / info.TileWidth) * info.Height, width: info.Width, height: info.Height};
+  }
+  function heldSeekStep(base, heldMs) {
+    return base * (heldMs >= 3000 ? (base === 10 ? 6 : 4) : heldMs >= 1200 ? (base === 10 ? 3 : 2) : 1);
+  }
+  // Merge individual choices rather than replacing another device's entire map.
+  // A reset timestamp also clears older choices on devices that were offline.
+  function mergeSeriesTracks(local, remote) {
+    function resetTime(data) { return data && Number.isFinite(data.reset) && data.reset > 0 ? data.reset : 0; }
+    var reset = Math.max(resetTime(local), resetTime(remote)), entries = {};
+    [remote, local].forEach(function (data) {
+      Object.keys(data && data.entries || {}).slice(0, 400).forEach(function (key) {
+        if (!/^(series|season):[a-zA-Z0-9-]{1,128}$/.test(key)) return;
+        ["Audio", "Subtitle"].forEach(function (type) {
+          var entry = data.entries[key] && data.entries[key][type], value = entry && entry.value;
+          if (!entry || !Number.isFinite(entry.updated) || entry.updated <= reset || !value) return;
+          var language = trackLanguage(value.language), clean;
+          if (type === "Subtitle" && value.off === true) clean = {off: true};
+          else if (/^[a-z]{2,3}$/.test(language) && ["main", "commentary", "description"].indexOf(value.role || "main") >= 0)
+            clean = {language: language, forced: !!value.forced, hearingImpaired: !!value.hearingImpaired, role: value.role || "main"};
+          if (!clean) return;
+          if (!entries[key]) entries[key] = {};
+          if (!entries[key][type] || entries[key][type].updated <= entry.updated)
+            entries[key][type] = {value: clean, updated: entry.updated};
+        });
+      });
+    });
+    var keys = Object.keys(entries).sort(function (a, b) {
+      function latest(key) { return Math.max(entries[key].Audio && entries[key].Audio.updated || 0, entries[key].Subtitle && entries[key].Subtitle.updated || 0); }
+      return latest(b) - latest(a);
+    });
+    keys.slice(200).forEach(function (key) { delete entries[key]; });
+    return {reset: reset, entries: entries};
+  }
+  function seriesTrack(item, type, data) {
+    var scopes = trackScopes(item), entries = data && data.entries || {};
+    for (var i = 0; i < scopes.length; i++) {
+      var entry = entries[scopes[i]] && entries[scopes[i]][type];
+      if (entry && entry.updated > (data.reset || 0)) return entry.value;
+    }
+    return null;
+  }
+  function imageTag(item, kind, owner) {
+    if (owner === item.Id) return kind === "Backdrop" ? (item.BackdropImageTags || [])[0] : (item.ImageTags || {})[kind];
+    if (kind === "Primary" && owner === item.SeriesId) return item.SeriesPrimaryImageTag;
+    if (kind === "Logo" && owner === item.ParentLogoItemId) return item.ParentLogoImageTag;
+    if (kind === "Backdrop" && owner === item.ParentBackdropItemId) return (item.ParentBackdropImageTags || [])[0];
+  }
+  function imageTagQuery(item, kind, owner) {
+    var tag = imageTag(item, kind, owner);
+    return tag ? "&tag=" + encodeURIComponent(tag) : "";
   }
   function animeAudio(source, language, remembered) {
     var normal = preferredTrack(source, "Audio", remembered),
@@ -1252,6 +1336,14 @@
     subtitleTimingKey: subtitleTimingKey,
     trackPreference: trackPreference,
     preferredTrack: preferredTrack,
+    trackScopes: trackScopes,
+    seerrPermissions: seerrPermissions,
+    trickplayInfo: trickplayInfo,
+    trickplayFrame: trickplayFrame,
+    heldSeekStep: heldSeekStep,
+    mergeSeriesTracks: mergeSeriesTracks,
+    seriesTrack: seriesTrack,
+    imageTagQuery: imageTagQuery,
     defaultSubtitle: defaultSubtitle,
     animeItem: animeItem,
     animeAudio: animeAudio,

@@ -2,7 +2,7 @@
 
 Ember is an unofficial, experimental Jellyfin client for LG webOS, Samsung Tizen and Android-based Fire TV devices, inspired by [Wholphin for Android TV](https://github.com/damontecres/Wholphin). This repository contains the standalone TV implementation; it does not require an Android build or a Jellyfin Web deployment.
 
-Current version: **0.2.92**. Developed for an LG C1 running webOS 6.5; Samsung Q6FN / Tizen 4.0 installation and startup are also confirmed. Android-based Fire TV devices use Media3 1.11.1 with device-derived Direct Play profiles, native subtitle support and compatibility fallback. Direct Play has been validated on Fire TV hardware, including HDR10 on a supported display. Other models and media combinations remain under testing. This is not affiliated with or an official release of Wholphin, Jellyfin, LG, Samsung, or Amazon, and does not have feature parity with Android Wholphin.
+Current version: **0.2.97**. Developed for an LG C1 running webOS 6.5; Samsung Q6FN / Tizen 4.0 installation and startup are also confirmed. Android-based Fire TV devices use Media3 1.11.1 with device-derived Direct Play profiles, native subtitle support and compatibility fallback. Direct Play has been validated on Fire TV hardware, including HDR10 on a supported display. Other models and media combinations remain under testing. This is not affiliated with or an official release of Wholphin, Jellyfin, LG, Samsung, or Amazon, and does not have feature parity with Android Wholphin.
 
 The app was previously named Wholphin for webOS. Existing installations update in place and keep their sign-in and settings.
 
@@ -17,7 +17,7 @@ The app was previously named Wholphin for webOS. Existing installations update i
 - Fire TV libass rendering for SSA/ASS, external text sidecars and in-place switching of supported loaded subtitles. LG/Tizen PGS continues to require server burn-in.
 - Next-episode autoplay, Up Next previews/countdown and configurable Still watching confirmation.
 - Live TV now/next guide, channel favorites, later listings, continuous channel browsing and playback without EPG.
-- Conservative Compatibility playback by default; experimental opt-in LG C1 native HEVC/4K support and playback diagnostics.
+- Automatic supported-format playback on LG C1 with decoder-error Compatibility fallback; device-derived native Fire TV playback and playback diagnostics.
 - Remote navigation, standard media controls with a seek bar and Options menu, Magic Remote pointer controls and lazy-loaded posters.
 
 ## Development
@@ -176,3 +176,42 @@ Run `npm run test:updater` for navigation/permission-flow fixtures. `UpdateRelea
 ### Fire TV launcher artwork (v0.2.92)
 
 The launcher uses an explicit `EmberLauncher` activity alias with the current tile artwork, while keeping the existing app ID, data and updater channel. On the Insignia, updating/rebooting/clearing temporary cache and changing the launcher entry did not replace Amazon's persisted old artwork. A full uninstall followed by a fresh v0.2.92 installation did: the launcher now shows the current flame and Ember wordmark. A full uninstall clears Ember's local sign-in/settings and its per-app install permission; use this only when the stale-artwork issue warrants signing in again. Normal in-place updates remain the default.
+
+### Full-size Fire TV artwork (v0.2.93)
+
+The Fire TV tile is now an opaque **1280×720** PNG on a black background, with a **512×512** square fallback. The application icon, banner and logo all reference the wide artwork; `roundIcon` references the square fallback. This changes the primary application icon too, since supplying only an Android TV banner left the square application icon available to Fire OS's sideloaded-app treatment. LG and Samsung artwork are unchanged. The APK's embedded dimensions and primary resource mapping have been checked. Actual Fire TV launcher padding/caching behavior remains to be validated on hardware; this release does not claim that the gray padding is eliminated.
+
+Source artwork: `platforms/branding/ember-firetv-tile.svg` and `ember-firetv-square.svg`. Regenerate the packaged PNGs with `node tools/render-firetv-branding.cjs` (requires Playwright; `PLAYWRIGHT_MODULE` and `CHROMIUM_PATH` can select an existing installation).
+
+### Avoid unnecessary LG video transcoding (v0.2.94)
+
+LG now defaults to **Automatic (LG C1)** when no playback-mode preference has been saved. Explicit saved Compatibility choices remain respected. The bounded native profile includes supported H.264/HEVC video with AAC/MP3/AC3/EAC3 audio in MP4/M4V/MKV, retaining codec, bit-depth, frame-rate, bitrate, resolution and Dolby Vision restrictions. Dolby Vision remains separately opt-in and limited to the existing supported MP4 variants; unsupported audio may be converted while video is copied, and unsupported video still transcodes.
+
+Locally rendered text subtitles no longer disable direct play just because a subtitle preference or subtitle track change was applied. Per-video/per-track timing corrections continue to work. Selecting non-default audio on LG requests a remux rather than silently playing the file's default audio track. Bitmap subtitles and failed text extraction retain their existing burn-in fallback. Native decoder errors retry Compatibility once at the same position; startup errors raised synchronously by the media engine are queued until playback preparation finishes, without a retry loop.
+
+Validation: `npm run test:lg-direct-play` covers the reported 720p HEVC Main 10 / AAC / MKV / ASS case with a -3-second local subtitle correction, audio-only remuxing, explicit Compatibility preference, non-default audio selection, synchronous startup failure, decoder failure after seeking and bounded retry. Existing LG HDR/DV/remux/subtitle/diagnostic regressions and three-platform subtitle retry/menu tests also pass. This release is built but has not been deployed to or validated on the occupied LG TV.
+
+
+### Show preferences, artwork refresh and quality controls (v0.2.95)
+
+- Episode audio/subtitle choices are remembered per season and series, separately for each profile, and synced through Jellyfin. Choices match languages, roles and accessibility flags across episodes with different stream indices. Existing profile language defaults remain the fallback.
+- Media artwork URLs include Jellyfin image tags when available, so updated posters, logos and backdrops can replace cached images.
+- **Player Options → Quality** offers Automatic and bitrate limits supported by the device profile. Changes preserve position, pause state and tracks, stay inside the player and apply only to the current video. Lowering the bitrate may require server conversion. Returning to Automatic restores normal playback negotiation.
+- Validation: 52 unit tests; cross-platform browser fixtures for show preference sync/isolation, artwork URLs, quality limits, remote navigation, retained tracks/position/pause and failed negotiation; existing language, subtitle and LG playback regressions. Packages built for all three platforms. Physical-device testing of this release is pending.
+
+
+### Fire TV system controls and HDR settings; library/Seerr polish (v0.2.96)
+
+- Fire TV native MediaSession and Amazon voice-control permission. Play, pause, seek, next/previous when available, and stop use the existing Ember playback/reporting flow. Session metadata omits playback URLs and credentials. Sessions deactivate in the background or at the end, ignore stale-generation commands, and release with the player. Alexa/catalog voice search is not included.
+- Fire TV HDR formats settings offer Automatic or Disabled for HDR10, HDR10+, HLG and Dolby Vision/base-layer fallback. Settings apply to this device for all profiles starting with the next video. They cannot force unsupported formats. Playback info includes detected display formats, Dolby Vision decoder presence and selected native format/transfer where available. This does not confirm the display's active HDR mode. Profile 7 conversion is not included.
+- Nested general-library folders inherit sort and watch status unless explicitly customized, separately per profile; parent genre/year filters remain scoped to that folder. Grid layout remains unchanged.
+- Seerr rechecks permissions on title entry and before confirmed requests, explains Standard/4K access, and offers title/permission refresh. Native request failures distinguish session expiry, quota, blocklists, duplicate requests and rate limits without displaying raw server output.
+- Validation: 55 unit tests; Java compilation; native local-HTTP Seerr/profile/quota tests; cross-platform menu/folder/quality/playback completion regressions; Fire TV system-transport/HDR fixtures; LG direct-play regressions. All three platform packages built. Physical Alexa/HDR validation is pending. No TV was updated while preparing this release.
+
+
+### Seek previews and hold acceleration (v0.2.97)
+
+- Scene previews and timestamps while seeking on-demand movies or episodes, using Jellyfin's existing Trickplay thumbnails for the selected media version. Works with hidden controls, the timeline and seek buttons across LG, Samsung and Fire TV.
+- Loads only the needed authenticated sprite sheet and caches at most two decoded sheets for the current playback. Requests reject redirects and oversized/invalid images. Missing or unavailable thumbnails keep the normal seek feedback and timestamp. Late responses cannot draw on a different title. No thumbnail generation or extra video decoding is requested; Live TV does not load thumbnails.
+- Held left/right seeking accelerates through 10/30/60-second stages, resets on release or direction change, and preserves paused state. Media seek keys use 30/60/120-second stages; live seeking retains its normal step. Repeat throttling and native seek coalescing remain bounded. Fire TV forwarded media keys carry repeat/release information while native D-pad behavior stays intact.
+- Validation: 59 unit tests; all-platform sprite/crop/cache/timestamp, hold/release, delayed-response, fallback/oversize/redirect/version and source-cleanup fixtures; existing seek/menu checks, native Fire TV and LG direct-play regressions, subtitle retries. All platform packages built; physical-device validation is pending. No TV was updated during release preparation.

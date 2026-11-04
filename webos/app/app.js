@@ -18,6 +18,8 @@
     seekState = null,
     seekCommitTimer = null,
     seekFeedbackTimer = null,
+    seekHold = null,
+    seekPreviewRequest = 0,
     resumeTimer = null,
     subtitleTimer = null,
     libraryItems = [],
@@ -197,11 +199,19 @@
         }
         throw error;
       }
-      if (options.subtitleText) {
-        var limit = 2097152;
+      if (options.subtitleText || options.imageBlob) {
+        var limit = options.imageBlob ? 8388608 : 2097152,
+          tooLarge = Object.assign(new Error(options.imageBlob ? "Thumbnail sheet is too large." : "Subtitle file is too large."), {code: options.imageBlob ? "IMAGE_TOO_LARGE" : "SUBTITLE_TOO_LARGE"}),
+          mime = (response.headers.get("content-type") || "").split(";")[0].toLowerCase();
+        if (options.imageBlob && ["image/jpeg", "image/png", "image/webp"].indexOf(mime) < 0) { controller.abort(); throw new Error("Invalid thumbnail image."); }
         if (Number(response.headers.get("content-length")) > limit) {
           if (response.body) await response.body.cancel();
-          throw Object.assign(new Error("Subtitle file is too large."), {code: "SUBTITLE_TOO_LARGE"});
+          throw tooLarge;
+        }
+        if (!response.body || !response.body.getReader) {
+          var bytesWithoutStream = await response.arrayBuffer();
+          if (bytesWithoutStream.byteLength > limit) throw tooLarge;
+          return options.imageBlob ? new Blob([bytesWithoutStream], {type: mime}) : new TextDecoder("utf-8").decode(bytesWithoutStream);
         }
         var reader = response.body.getReader(),
           chunks = [],
@@ -213,7 +223,7 @@
             bytes += part.value.length;
             if (bytes > limit) {
               await reader.cancel();
-              throw Object.assign(new Error("Subtitle file is too large."), {code: "SUBTITLE_TOO_LARGE"});
+              throw tooLarge;
             }
             chunks.push(part.value);
           }
@@ -226,7 +236,7 @@
           all.set(chunk, offset);
           offset += chunk.length;
         });
-        return new TextDecoder("utf-8").decode(all);
+        return options.imageBlob ? new Blob([all], {type: mime}) : new TextDecoder("utf-8").decode(all);
       }
       return response.status === 204 ? null : await response.json();
     } finally {
@@ -342,7 +352,9 @@
   }
   async function back() {
     if (playing && !livePreview && !document.getElementById("seek-feedback").hidden) {
+      var timelinePreview = document.getElementById("seek-feedback").classList.contains("is-timeline");
       hideSeekFeedback();
+      if (timelinePreview) hideControls();
       return;
     }
     var settingsMenu = document.getElementById("setting-options");
@@ -895,11 +907,12 @@
       "",
       "Clear remembered audio and subtitle choices for this profile.",
       function () {
+        saveLanguagePreference("series-track-preferences", {reset: Date.now(), entries: {}});
         localStorage.removeItem(accountKey("track-preferences"));
         localStorage.removeItem(accountKey("subtitle-choices"));
         localStorage.removeItem(accountKey("subtitle-timing"));
         message(
-          "Remembered audio/subtitle choices cleared. New videos will use Jellyfin defaults.",
+          "Remembered choices cleared. Your profile language defaults still apply.",
         );
       },
     );
@@ -913,7 +926,7 @@
       return P.nativePlayback === false
         ? (P.playbackName || "Samsung AVPlay") + " (Compatibility)"
         : decoder.native
-          ? "LG C1 native (experimental)"
+          ? "Automatic (LG C1)"
           : "Compatibility";
     }
     var modeControl = row(
@@ -924,7 +937,7 @@
         ? "Detect device decoders and audio output for direct play; fall back to Compatibility on errors."
         : P.nativePlayback === false
         ? (P.playbackName || "Samsung AVPlay") + " with Jellyfin compatibility transcoding."
-        : "Compatibility works with the widest range of files. Native enables supported C1 formats.",
+        : "Try supported LG formats without video conversion. Fall back to Compatibility if playback fails.",
       function (control) {
         var before = decoder.native;
         decoder.native = false; var compatible = modeValue();
@@ -964,6 +977,7 @@
       },
     );
     vision.disabled = !decoder.native;
+    if (P.hdrOptions) row(device, "HDR formats", "", "Detected support and format overrides for this Fire TV.", function () { return go(hdrSettings); });
     if (P.nativePlayback === false) {
       modeControl.disabled = !P.playbackPolicy;
       vision.hidden = true;
@@ -1133,7 +1147,7 @@
           if (previous) setTimeout(function () { previous.remove(); }, 1600);
           title.textContent = item.Name || "Ember";
         };
-        setImageSource(img, context.server + "/Items/" + encodeURIComponent(item.Id) + "/Images/Backdrop/0?maxWidth=1920&quality=85");
+        setImageSource(img, context.server + "/Items/" + encodeURIComponent(item.Id) + "/Images/Backdrop/0?maxWidth=1920&quality=85" + C.imageTagQuery(item, "Backdrop", item.Id));
       }
       active.timer = setTimeout(next, options.duration * 1000);
     }
@@ -1206,9 +1220,19 @@
         if (!document || !document.CustomPrefs || typeof document.CustomPrefs !== "object" || Array.isArray(document.CustomPrefs))
           throw new Error("Invalid display preferences");
         var dirty = storedLanguage(account, "language-sync-pending", {}), uploaded = {}, write = false;
-        ["subtitle-defaults", "audio-defaults", "seerr-connection"].forEach(function (suffix) {
+        ["subtitle-defaults", "audio-defaults", "seerr-connection", "series-track-preferences"].forEach(function (suffix) {
           var local = storedLanguage(account, suffix, null), remote = null;
           try { remote = JSON.parse(document.CustomPrefs["ember-" + suffix]); } catch (_) {}
+          if (suffix === "series-track-preferences") {
+            var merged = C.mergeSeriesTracks(local, remote), serialized = JSON.stringify(merged);
+            if (local || remote) localStorage.setItem(languageKey(account, suffix), serialized);
+            if ((local || remote) && (dirty[suffix] || serialized !== JSON.stringify(remote))) {
+              uploaded[suffix] = serialized;
+              document.CustomPrefs["ember-" + suffix] = serialized;
+              write = true;
+            }
+            return;
+          }
           if (suffix === "seerr-connection") {
             var legacy = storedLanguage(account, "seerr", {});
             local = normalizedSeerrConnection(local) || normalizedSeerrConnection({server: legacy.server || localStorage.getItem("wholphin-seerr-server:" + account.server)});
@@ -2047,7 +2071,10 @@
   async function seerrDetail(type, id, me) {
     var r = reset("Loading title…"), account = session, data;
     main.className = "seerr-page";
-    try { data = await seerrApi("/" + type + "/" + id); }
+    try {
+      var current = await Promise.all([seerrApi("/" + type + "/" + id), seerrApi("/auth/me")]);
+      data = current[0]; me = current[1];
+    }
     catch (error) { if (r === revision) { message(error.message); button("Retry", function () { return seerrDetail(type, id, me); }, main); focusFirst(); } return; }
     if (r !== revision || session !== account) return;
     main.querySelector("h1").textContent = data.title || data.name || "Title";
@@ -2058,18 +2085,18 @@
     var libraryId = info.jellyfinMediaId || info.jellyfinMediaId4k;
     if (typeof libraryId === "string" && /^[a-f0-9-]{32,36}$/i.test(libraryId)) button("Open in Jellyfin library", function () { return go(function () { return detail(libraryId); }); }, actions);
     var feedback = el("p", "", main); feedback.setAttribute("role", "status");
-    var standardAllowed = !!(permissions & (2 | 32 | (type === "movie" ? 262144 : 524288))),
-      fourKAllowed = !!(permissions & (2 | 1024 | (type === "movie" ? 2048 : 4096))),
+    var access = C.seerrPermissions(permissions, type),
+      standardAllowed = access.standard,
+      fourKAllowed = access.fourK,
       allowed = standardAllowed || fourKAllowed;
-    var pending = [2, 3, 5, 6].indexOf(info.status) >= 0;
     if (!allowed) el("p", "This Seerr account cannot request " + (type === "movie" ? "movies." : "TV shows."), main);
     else {
       var form = el("section", null, main), selected = [], is4k = !standardAllowed && fourKAllowed;
       el("h2", "Request " + (type === "movie" ? "movie" : "seasons"), form);
-      var standardPending = pending;
+      el("p", standardAllowed && fourKAllowed ? "You can request Standard or 4K." : fourKAllowed ? "This account can request 4K only." : "This account can request Standard only.", form);
       var quality = button("Quality: " + (is4k ? "4K" : "Standard"), function () {
         is4k = !is4k; quality.textContent = "Quality: " + (is4k ? "4K" : "Standard");
-        selected = []; renderSeasons(); submit.textContent = requestLabel; refresh();
+        selected = []; feedback.textContent = ""; renderSeasons(); submit.textContent = requestLabel; refresh();
       }, form);
       quality.hidden = !fourKAllowed;
       quality.disabled = !(standardAllowed && fourKAllowed);
@@ -2084,6 +2111,9 @@
           Array.prototype.forEach.call(form.querySelectorAll("button"), function (b) { b.disabled = true; });
           feedback.textContent = "Submitting request…";
           try {
+            var latest = await seerrApi("/auth/me"), latestAccess = C.seerrPermissions(latest.permissions, type);
+            if (r !== revision || session !== account) return;
+            if (!(requestedQuality ? latestAccess.fourK : latestAccess.standard)) throw new Error("Your request permissions have changed. Refresh this title to see the available options.");
             await seerrApi("/request", Object.assign({mediaType: type, mediaId: id, is4k: requestedQuality}, type === "tv" ? {seasons: requestedSeasons} : {}));
             if (r !== revision || session !== account) return;
             feedback.textContent = "Request submitted. Track its progress in My requests.";
@@ -2100,7 +2130,7 @@
             quality.disabled = !(standardAllowed && fourKAllowed);
             submit.textContent = "Requested";
             focusContent(returnButton);
-          } catch (error) { if (r === revision) { feedback.textContent = error.message; quality.disabled = !(standardAllowed && fourKAllowed); renderSeasons(); refresh(); focusContent(submit); } }
+          } catch (error) { if (r === revision && session === account) { feedback.textContent = error.message; quality.disabled = !(standardAllowed && fourKAllowed); renderSeasons(); refresh(); focusContent(submit); } }
         }, submit);
       }, form);
       function refresh() { submit.disabled = type === "movie" ? [2, 3, 5, 6].indexOf(is4k ? info.status4k : info.status) >= 0 : !selected.length; }
@@ -2118,8 +2148,9 @@
         });
       }
       renderSeasons(); refresh();
-      if (type === "movie" && standardPending) feedback.textContent = seerrStatus(info) + ".";
+      if (type === "movie" && [2, 3, 5, 6].indexOf(is4k ? info.status4k : info.status) >= 0) feedback.textContent = (is4k ? "4K" : "Standard") + " is already requested or available.";
     }
+    button("Refresh title and permissions", function () { return seerrDetail(type, id, me); }, main);
     var returnButton = button("Back to Seerr", back, main);
     focusContent(submit && !submit.disabled ? submit : (seasons && seasons.querySelector("button:not(:disabled)")) || actions.querySelector("button") || returnButton);
   }
@@ -2624,7 +2655,7 @@
       ? session.server +
           "/Items/" +
           encodeURIComponent(id) +
-          "/Images/Backdrop?maxWidth=1280&quality=80"
+          "/Images/Backdrop?maxWidth=1280&quality=80" + C.imageTagQuery(item, "Backdrop", id)
       : null;
   }
   function setBackdrop(item) {
@@ -2718,13 +2749,14 @@
     var image = document.getElementById("preview-logo"),
       title = document.getElementById("preview-title"),
       id = C.logoItem(item);
-    if (id && image.dataset.logoItem === id) {
+    var logoKey = id ? id + C.imageTagQuery(item, "Logo", id) : "";
+    if (id && image.dataset.logoItem === logoKey) {
       title.classList.toggle("has-logo", !image.hidden);
       return;
     }
     clearTimeout(logoTimer);
     var request = ++logoRequest;
-    image.dataset.logoItem = id || "";
+    image.dataset.logoItem = logoKey;
     image.hidden = true;
     title.classList.remove("has-logo");
     if (!id) {
@@ -2750,7 +2782,7 @@
       setImageSource(image, session.server +
         "/Items/" +
         encodeURIComponent(id) +
-        "/Images/Logo?maxWidth=600&quality=90");
+        "/Images/Logo?maxWidth=600&quality=90" + C.imageTagQuery(item, "Logo", id));
     }, 150);
   }
   function updatePreview(item) {
@@ -2821,7 +2853,7 @@
       encodeURIComponent(id) +
       "/Images/" +
       kind +
-      (landscape ? "?maxWidth=720&quality=80" : "?maxWidth=450&quality=80")
+      (landscape ? "?maxWidth=720&quality=80" : "?maxWidth=450&quality=80") + C.imageTagQuery(item, kind, id)
     );
   }
   function setImageSource(img, url) {
@@ -4045,7 +4077,7 @@
       if (offset === before) break;
     }
   }
-  async function listing(id, title, focusControl, seasonContext, tvContext) {
+  async function listing(id, title, focusControl, seasonContext, tvContext, inheritedOptions) {
     if (seasonContext) return seasonBrowser(id, title, seasonContext);
     var r = reset(title),
       controller = new AbortController(),
@@ -4082,6 +4114,11 @@
       genre: "",
       year: "",
     };
+    var inheritedKey = "library-inherited-options:" + scopeKey;
+    if (inheritedOptions) localStorage.setItem(accountKey(inheritedKey), JSON.stringify({sort: inheritedOptions.sort, watched: inheritedOptions.watched}));
+    var explicitOptions = readPreference(preferenceKey, null),
+      inherited = readPreference(inheritedKey, {}),
+      effectiveOptions = Object.assign({}, defaults, inherited, explicitOptions || {});
     function fresh(options) {
       return {
         options: options,
@@ -4096,11 +4133,8 @@
         facets: null,
       };
     }
-    var state =
-      listingStates.get(key) ||
-      fresh(
-        Object.assign({}, defaults, readPreference(preferenceKey, defaults)),
-      );
+    var state = listingStates.get(key);
+    if (!state || (inheritedOptions && !explicitOptions && JSON.stringify(state.options) !== JSON.stringify(effectiveOptions))) state = fresh(effectiveOptions);
     listingStates.delete(key);
     listingStates.set(key, state);
     while (listingStates.size > 3)
@@ -4249,6 +4283,13 @@
             holder,
             seasonContext ? "landscape" : null,
             grid,
+            function (item) {
+              return go(function () {
+                if (item.IsFolder && ["Series", "Season", "BoxSet"].indexOf(item.Type) < 0)
+                  return listing(item.Id, item.Name, false, null, null, state.options);
+                return detail(item.Id, !!item.IsLiveProgram);
+              });
+            },
           );
           card = grid.lastElementChild;
           card.dataset.libraryIndex = index;
@@ -5745,7 +5786,7 @@
               style.enabled = true;
               localStorage.setItem(accountKey("subtitle-appearance"), JSON.stringify(style));
             }
-            saveSubtitleChoice(item.Id, updated, track.Index);
+            saveSubtitleChoice(item, updated, track.Index);
             closeSubtitleSearch(false);
             try {
               await downloaded(updated, track);
@@ -5843,9 +5884,7 @@
           chosen =
             saved && saved.source === source.Id
               ? saved.index
-              : C.defaultSubtitle(source,
-                  await defaultAudio(item, source),
-                  subtitleDefaults(), readPreference("track-preferences", {}).Subtitle);
+              : defaultSubtitle(item, source, await defaultAudio(item, source));
         if (!subtitlePicker.isConnected) return;
         if (chosen == null) chosen = source.DefaultSubtitleStreamIndex;
         if (
@@ -5878,7 +5917,7 @@
           subtitlePicker.setAttribute("aria-expanded", "false");
           if (persist) {
             subtitlePicker.dataset.explicit = "true";
-            saveSubtitleChoice(item.Id, source, track.index);
+            saveSubtitleChoice(item, source, track.index);
             subtitlePicker.focus();
           }
         }
@@ -5986,7 +6025,7 @@
         movieLogo.onload = function () {
           if (heading.isConnected) { movieLogo.hidden = false; heading.classList.add("has-logo"); }
         };
-        setImageSource(movieLogo, session.server + "/Items/" + encodeURIComponent(movieLogoId) + "/Images/Logo?maxWidth=720&quality=90");
+        setImageSource(movieLogo, session.server + "/Items/" + encodeURIComponent(movieLogoId) + "/Images/Logo?maxWidth=720&quality=90" + C.imageTagQuery(item, "Logo", movieLogoId));
       }
     }
     setBackdrop(item);
@@ -6589,6 +6628,9 @@
   }
   var animeAncestry = new Map();
   async function defaultAudio(item, source, signal) {
+    var scoped = C.seriesTrack(item, "Audio", readPreference("series-track-preferences", {})),
+      chosen = C.preferredTrack(source || {}, "Audio", scoped);
+    if (chosen != null) return chosen;
     var remembered = readPreference("track-preferences", {}).Audio,
       language = readPreference("audio-defaults", {}).animeLanguage;
     if (!language) return C.preferredTrack(source || {}, "Audio", remembered);
@@ -6614,10 +6656,15 @@
   function subtitleDefaults() {
     return Object.assign({mode: "remember", language: "eng", foreignEnglish: true}, readPreference("subtitle-defaults", {}));
   }
+  function defaultSubtitle(item, source, audioIndex) {
+    var scoped = C.seriesTrack(item, "Subtitle", readPreference("series-track-preferences", {}));
+    return scoped ? C.preferredTrack(source, "Subtitle", scoped)
+      : C.defaultSubtitle(source, audioIndex, subtitleDefaults(), readPreference("track-preferences", {}).Subtitle);
+  }
   function subtitleDefaultsSettings() {
     reset("Subtitle defaults");
     el("p", languageSyncText(), main).className = "language-sync-status";
-    el("p", "A manual choice for a title takes priority.", main);
+    el("p", "Manual choices for an episode, season or show take priority.", main);
     var options = subtitleDefaults(), list = el("div", null, main);
     list.className = "screensaver-settings";
     function choice(key, label, choices) {
@@ -6902,13 +6949,32 @@
   }
   function decoderOptions() {
     return readPreference("decoder-options", {
-      native: !!P.playbackPolicy,
+      native: !!(P.playbackPolicy || P.defaultNativePlayback),
       dolbyVision: false,
     });
   }
-  function saveSubtitleChoice(itemId, source, index) {
+  function hdrSettings() {
+    reset("HDR formats");
+    var options = P.hdrOptions(), caps = P.playbackDiagnostics();
+    el("p", "Applies to this Fire TV for all profiles, starting with the next video. Automatic uses detected support; disabling a format requests compatible server conversion.", main);
+    el("p", "Display reports: " + ((caps.displayHdrTypes || []).join(", ") || "No HDR formats reported"), main);
+    el("p", "Dolby Vision hardware decoder: " + (caps.dolbyVisionDecoder ? "Detected" : "Not detected") + ". Decoder availability alone does not guarantee support for every Dolby Vision profile.", main);
+    var list = el("div", null, main); list.className = "screensaver-settings";
+    [["hdr10", "HDR10"], ["hdr10plus", "HDR10+"], ["hlg", "HLG"], ["dolbyVision", "Dolby Vision (including HDR10 base-layer fallback)"]].forEach(function (entry) {
+      var control = button("", function () {
+        settingChoices(entry[1], [["auto", "Automatic"], ["off", "Disabled"]], options[entry[0]] || "auto", function (value) {
+          options[entry[0]] = value; P.saveHdrOptions(options); refresh();
+        }, control);
+      }, list);
+      function refresh() { control.textContent = entry[1] + ": " + (options[entry[0]] === "off" ? "Disabled" : "Automatic"); }
+      refresh();
+    });
+    button("Reset HDR formats to Automatic", function () { P.saveHdrOptions({}); return hdrSettings(); }, list);
+    focusContent(list.querySelector("button"));
+  }
+  function saveSubtitleChoice(item, source, index) {
     var choices = readPreference("subtitle-choices", {});
-    choices[itemId] = { source: source.Id, index: index, updated: Date.now() };
+    choices[item.Id] = { source: source.Id, index: index, updated: Date.now() };
     Object.keys(choices)
       .sort(function (a, b) {
         return choices[b].updated - choices[a].updated;
@@ -6922,7 +6988,7 @@
         accountKey("subtitle-choices"),
         JSON.stringify(choices),
       );
-      rememberTrack("Subtitle", C.trackPreference(source, "Subtitle", index));
+      rememberTrack("Subtitle", C.trackPreference(source, "Subtitle", index), item);
     } catch (_) {}
   }
   function playbackOptions() {
@@ -6931,7 +6997,18 @@
       readPreference("playback-options", {}),
     );
   }
-  function rememberTrack(type, preference) {
+  function rememberTrack(type, preference, item) {
+    var scopes = C.trackScopes(item);
+    if (scopes.length) {
+      if (!preference) return;
+      var data = C.mergeSeriesTracks(readPreference("series-track-preferences", {}), null), updated = Math.max(Date.now(), data.reset + 1);
+      scopes.forEach(function (key) {
+        if (!data.entries[key]) data.entries[key] = {};
+        data.entries[key][type] = {value: preference, updated: updated};
+      });
+      saveLanguagePreference("series-track-preferences", C.mergeSeriesTracks(data, null));
+      return;
+    }
     var preferences = readPreference("track-preferences", {});
     if (preference) preferences[type] = preference;
     else delete preferences[type];
@@ -7077,6 +7154,7 @@
       !active || active.live || !C.tracks(active.source, "Subtitle").length;
     document.getElementById("subtitle-timing").disabled = !active || active.live;
     document.getElementById("subtitle-appearance").disabled = !active || active.live;
+    document.getElementById("quality").disabled = !active || active.live;
     document.getElementById("chapters").disabled =
       !active || active.live || !C.chapters(active.item).length;
     document.getElementById("previous-video").hidden = !!(active && active.live);
@@ -7084,6 +7162,15 @@
     document.getElementById("next-video").hidden = !!(active && active.live);
     document.getElementById("next-video").disabled =
       !active || active.live || (!queueItems.length && !active.episodes.length && !active.nextError);
+    if (active && video.setMediaInfo) video.setMediaInfo({
+      title: active.item.SeriesName || active.item.Name || "Ember",
+      subtitle: active.item.SeriesName ? active.item.Name : "",
+      duration: Math.max(0, Number(active.item.RunTimeTicks) / 10000 || 0),
+      offset: Math.max(0, active.offset || 0) * 1000,
+      live: active.live,
+      next: !document.getElementById("next-video").disabled,
+      previous: !document.getElementById("previous-video").disabled,
+    });
   }
   function loadFollowing(active) {
     active.nextError = null;
@@ -7165,7 +7252,7 @@
           "/Items/" +
           encodeURIComponent(active.item.Id),
         {
-          Fields: "Chapters,MediaSources,MediaStreams",
+          Fields: "Chapters,MediaSources,MediaStreams,Trickplay",
         },
         null,
         "GET",
@@ -7189,6 +7276,16 @@
     }
     if (active.item.Type === "Episode" && active.item.SeriesId)
       loadFollowing(active);
+    active.seekTiles = {cache: new Map(), failed: new Set(), pending: null, wanted: null};
+    var trickplayMetadata = active.item.Trickplay ? Promise.resolve(active.item)
+      : active.metadata ? active.metadata.then(function () { return active.item; })
+      : api("/Users/" + encodeURIComponent(active.account.user) + "/Items/" + encodeURIComponent(active.item.Id), {Fields: "Trickplay"}, null, "GET",
+          {session: active.account, signal: active.extrasController.signal, timeoutMs: 4000});
+    trickplayMetadata.then(function (item) {
+      if (playing !== active) return;
+      active.trickplayInfo = C.trickplayInfo(item, active.source.Id);
+      if (active.seekTiles.wanted) loadSeekTile(active);
+    }).catch(function () {});
   }
   function renderSubtitleTiming(container, active) {
     el("h3", "Subtitle timing", container);
@@ -7255,9 +7352,10 @@
       info: "Playback information",
       appearance: "Subtitle appearance",
       timing: "Subtitle timing",
+      quality: "Playback quality",
     }[kind];
     panel.classList.toggle("subtitle-picker", kind === "subtitles");
-    panel.classList.toggle("compact-menu", kind === "audio" || kind === "chapters");
+    panel.classList.toggle("compact-menu", kind === "audio" || kind === "chapters" || kind === "quality");
     panel.classList.toggle("subtitle-appearance-panel", kind === "appearance");
     panel.setAttribute("aria-label", title);
     el("h2", title, panel);
@@ -7315,6 +7413,12 @@
         dropped: quality && quality.droppedVideoFrames,
         frames: quality && quality.totalVideoFrames,
       });
+      if (P.playbackDiagnostics) {
+        var detected = P.playbackDiagnostics(), format = video.nativeFormat && video.nativeFormat();
+        rows.push(["Display HDR support", (detected.displayHdrTypes || []).join(", ") || "Not reported"]);
+        rows.push(["Dolby Vision decoder", detected.dolbyVisionDecoder ? "Detected" : "Not detected"]);
+        if (format) rows.push(["Selected native format", [format.mime, format.codecs, ({6: "PQ transfer", 7: "HLG transfer", 3: "SDR transfer"})[format.colorTransfer]].filter(Boolean).join(" · ")]);
+      }
       var list = el("dl", null, content);
       list.className = "playback-info";
       rows.forEach(function (row) {
@@ -7350,6 +7454,14 @@
           },
           content,
         );
+    } else if (kind === "quality") {
+      el("p", "For this playback only. A lower limit can reduce buffering and may convert the video. Your position and selected tracks are kept.", content);
+      [[0, "Automatic"], [60000000, "60 Mbps"], [40000000, "40 Mbps"], [20000000, "20 Mbps"], [10000000, "10 Mbps"], [5000000, "5 Mbps"], [2000000, "2 Mbps"]].forEach(function (entry) {
+        if (entry[0] > active.profileMaxBitrate) return;
+        var control = button(entry[1], function () { return switchQuality(active, entry[0]); }, content);
+        control.setAttribute("aria-pressed", String(entry[0] === active.maxBitrate));
+      });
+      focusContent(content.querySelector('[aria-pressed="true"]') || content.querySelector("button"));
     } else if (kind === "appearance") renderSubtitleAppearance(content, true);
     else if (kind === "timing") renderSubtitleTiming(content, active);
     else if (kind === "queue") renderQueue(content, true);
@@ -7443,7 +7555,7 @@
         option(track.index, track.label, subtitle ? [track.external ? "External" : "Embedded", localSubtitle(track.index) ? "No burn-in" : "Requires video conversion"].join(" · ") : null);
       });
       if (subtitle && findButton) content.appendChild(findButton);
-      if (!subtitle) el("p", "Language choices are remembered for this account on this TV.", content);
+      if (!subtitle) el("p", active.item.Type === "Episode" ? "Choices are remembered for this show and season, and synced for this profile." : "Language choices are remembered for this profile on this TV.", content);
       {
         var currentOption = content.querySelector('[aria-pressed="true"]');
         if (currentOption) focusContent(currentOption);
@@ -7465,8 +7577,8 @@
     var preference = C.trackPreference(active.source, type, index);
     if ((subtitle ? active.subtitleIndex : active.audioIndex) === index &&
         !(subtitle && index >= 0 && !active.subtitleCues && subtitleOptions().enabled && C.textSubtitle(active.source, index))) {
-      rememberTrack(type, preference);
-      if (subtitle) saveSubtitleChoice(active.item.Id, active.source, index);
+      if (subtitle) saveSubtitleChoice(active.item, active.source, index);
+      else rememberTrack(type, preference, active.item);
       closePlaybackPanel();
       return;
     }
@@ -7491,8 +7603,7 @@
         active.subtitleIndex = index;
         active.subtitleCues = cues;
         active.subtitleStyle = style;
-        rememberTrack(type, preference);
-        saveSubtitleChoice(active.item.Id, active.source, index);
+        saveSubtitleChoice(active.item, active.source, index);
         applySubtitleStyle(subtitleOverlay, style);
         renderSubtitleOverlay();
         closePlaybackPanel();
@@ -7507,7 +7618,8 @@
     var nextSubtitle = active.subtitleIndex;
     if (!subtitle && nextSubtitle < 0) {
       var manualSubtitle = readPreference("subtitle-choices", {})[active.item.Id];
-      if (!(manualSubtitle && manualSubtitle.source === active.source.Id && manualSubtitle.index === -1)) {
+      var scopedSubtitle = C.seriesTrack(active.item, "Subtitle", readPreference("series-track-preferences", {}));
+      if (!(scopedSubtitle && scopedSubtitle.off) && !(manualSubtitle && manualSubtitle.source === active.source.Id && manualSubtitle.index === -1)) {
         var automatic = C.defaultSubtitle(active.source, index, {mode: "off", foreignEnglish: subtitleDefaults().foreignEnglish});
         if (automatic >= 0) nextSubtitle = automatic;
       }
@@ -7527,6 +7639,21 @@
     } catch (error) {
       if (playing === active && !paused) await video.play();
       message("Could not change track. " + error.message);
+    }
+  }
+  async function switchQuality(active, maxBitrate) {
+    if (playing !== active || busy || !active.started || active.live) return;
+    if (active.maxBitrate === maxBitrate) { closePlaybackPanel(); return; }
+    var ticks = position(), paused = video.paused;
+    video.pause();
+    try {
+      await play(active.item, ticks, false, false, {
+        trackChange: true, maxBitrate: maxBitrate, paused: paused,
+        mediaSourceId: active.source.Id, audioIndex: active.audioIndex, subtitleIndex: active.subtitleIndex,
+      });
+    } catch (error) {
+      if (playing === active && !paused && !document.hidden) await video.play();
+      message("Could not change quality. " + error.message);
     }
   }
   var upNext = el("section", null, player);
@@ -7715,7 +7842,7 @@
       return openPlaybackPanel("info");
     });
   };
-  ["audio", "subtitles", "chapters", "queue"].forEach(function (kind) {
+  ["audio", "subtitles", "chapters", "queue", "quality"].forEach(function (kind) {
     document.getElementById(kind).onclick = function () {
       run(function () {
         return openPlaybackPanel(kind);
@@ -7847,10 +7974,11 @@
     active.lastPositionTicks = Math.round(video.currentTime * 10000000);
     if (active.pendingPreference) {
       if (active.pendingPreference.type === "Subtitle")
-        saveSubtitleChoice(active.item.Id, active.source, active.subtitleIndex);
-      rememberTrack(
+        saveSubtitleChoice(active.item, active.source, active.subtitleIndex);
+      else rememberTrack(
         active.pendingPreference.type,
         active.pendingPreference.value,
+        active.item,
       );
       active.pendingPreference = null;
     }
@@ -7879,6 +8007,10 @@
     message("Preparing playback…");
     var returnItem = item,
       openedLive = null;
+    if (options.trackChange && previous && previous.item.Id === item.Id) {
+      if (options.maxBitrate == null) options.maxBitrate = previous.maxBitrate;
+      if (options.compatibility == null) options.compatibility = previous.compatibility;
+    }
     try {
       if (live) {
         if (!item.ChannelId)
@@ -7906,10 +8038,10 @@
       var sourceMetadata = null;
       if (
         !live &&
-        ((decoder.native && !options.compatibility) ||
+        ((decoder.native && !options.compatibility) || options.maxBitrate ||
           subtitleOptions().enabled ||
           preferences.Audio ||
-          preferences.Subtitle ||
+          preferences.Subtitle || C.seriesTrack(item, "Audio", readPreference("series-track-preferences", {})) || C.seriesTrack(item, "Subtitle", readPreference("series-track-preferences", {})) ||
           subtitleDefaults().mode !== "remember" || subtitleDefaults().foreignEnglish || readPreference("audio-defaults", {}).animeLanguage ||
           ((options.audioIndex != null || options.subtitleIndex != null) &&
             !options.mediaSourceId))
@@ -7947,7 +8079,7 @@
           options.subtitleIndex = savedSubtitle && sourceMetadata && savedSubtitle.source === sourceMetadata.Id &&
             (savedSubtitle.index === -1 || (sourceMetadata.MediaStreams || []).some(function (s) { return s.Type === "Subtitle" && s.Index === savedSubtitle.index; }))
             ? savedSubtitle.index
-            : C.defaultSubtitle(sourceMetadata || {}, options.audioIndex, subtitleDefaults(), preferences.Subtitle);
+            : defaultSubtitle(item, sourceMetadata || {}, options.audioIndex);
         }
         if (
           options.audioIndex != null ||
@@ -8006,25 +8138,34 @@
         dolbyVision: decoder.dolbyVision,
       });
       if (nativeMode && P.playbackProfile) deviceProfile = P.playbackProfile(C.profile(), sourceMetadata);
-      var forceTranscode =
-        !!live || !!options.compatibility ||
-        (!(nativeMode && P.playbackPolicy) && (!!options.trackChange || !!subtitleCues || !!options.applyPreferences));
+      var profileMaxBitrate = deviceProfile.MaxStreamingBitrate,
+        maxBitrate = [2000000, 5000000, 10000000, 20000000, 40000000, 60000000].indexOf(options.maxBitrate) >= 0 ? options.maxBitrate : 0,
+        qualityConversion = maxBitrate > 0 && (!sourceMetadata || !Number.isFinite(sourceMetadata.Bitrate) || sourceMetadata.Bitrate <= 0 || sourceMetadata.Bitrate > Math.min(maxBitrate, profileMaxBitrate));
+      if (maxBitrate) deviceProfile.MaxStreamingBitrate = Math.min(maxBitrate, profileMaxBitrate);
+      // Native engines with track control can select embedded audio directly.
+      // LG's HTML player needs a remux only for a non-default audio track;
+      // text rendered by Ember must not disable direct play of the video.
+      var nativeTrackControl = nativeMode && !!P.playbackPolicy;
+      var audioNeedsRemux = !nativeTrackControl && options.audioIndex != null &&
+        (!sourceMetadata || options.audioIndex !== sourceMetadata.DefaultAudioStreamIndex);
+      var forceTranscode = !!live || !!options.compatibility || qualityConversion || audioNeedsRemux ||
+        (!nativeMode && (!!options.trackChange || !!subtitleCues || !!options.applyPreferences));
       var requestBody = {
         UserId: session.user,
         StartTimeTicks: ticks,
         IsPlayback: true,
         AutoOpenLiveStream: true,
         EnableDirectPlay: !forceTranscode,
-        EnableDirectStream: nativeMode,
+        EnableDirectStream: nativeMode && !qualityConversion,
         EnableTranscoding: true,
         AllowVideoStreamCopy:
-          !options.compatibility && (!(deliveredSubtitleIndex >= 0) || (nativeMode && !!P.playbackPolicy)),
+          !options.compatibility && !qualityConversion && (!(deliveredSubtitleIndex >= 0) || (nativeMode && !!P.playbackPolicy)),
         MaxAudioChannels: nativeMode && P.playbackProfile
           ? Number(deviceProfile.TranscodingProfiles[0].MaxAudioChannels) || 2
           : nativeMode ? 6 : 2,
         AudioStreamIndex: options.audioIndex,
         SubtitleStreamIndex: subtitleCues ? -1 : options.subtitleIndex,
-        MediaSourceId: options.mediaSourceId || (nativeMode && P.playbackProfile && sourceMetadata ? sourceMetadata.Id : undefined),
+        MediaSourceId: options.mediaSourceId || ((nativeMode || subtitleCues) && sourceMetadata ? sourceMetadata.Id : undefined),
       };
       var info = await playbackApi(
         "/Items/" + encodeURIComponent(item.Id) + "/PlaybackInfo",
@@ -8081,6 +8222,9 @@
             ? options.subtitleIndex
             : selected.source.DefaultSubtitleStreamIndex,
         nativeMode: nativeMode,
+        compatibility: !!options.compatibility,
+        maxBitrate: maxBitrate,
+        profileMaxBitrate: profileMaxBitrate,
         profileName: deviceProfile.Name,
         policyReason: policy.reason,
         pendingPreference: options.pendingPreference,
@@ -8137,7 +8281,7 @@
       playerLogo.dataset.playingItem = item.Id;
       playerLogo.onload = function () { if (playerLogo.dataset.playingItem === item.Id) playerLogo.hidden = false; };
       playerLogo.onerror = function () { playerLogo.hidden = true; };
-      if (logoId) setImageSource(playerLogo, session.server + "/Items/" + encodeURIComponent(logoId) + "/Images/Logo?maxWidth=400&quality=90");
+      if (logoId) setImageSource(playerLogo, session.server + "/Items/" + encodeURIComponent(logoId) + "/Images/Logo?maxWidth=400&quality=90" + C.imageTagQuery(item, "Logo", logoId));
       else playerLogo.removeAttribute("src");
       document.getElementById("end-time").textContent = "";
       if (P.playbackTracks && video.configure)
@@ -8162,6 +8306,11 @@
     } finally {
       if (playController === controller) playController = null;
       busy = false;
+      if (playing && playing.pendingCompatibility) {
+        var failed = playing;
+        failed.pendingCompatibility = false;
+        run(function () { return compatibilityPlayback(failed, true); });
+      }
       drainPendingAdvance();
       if (openedLive)
         await api(
@@ -8281,10 +8430,10 @@
       playing &&
       playing.nativeMode &&
       !document.hidden &&
-      !busy &&
       !playing.fallbackInProgress
     ) {
       var active = playing;
+      if (busy) { active.pendingCompatibility = true; return; }
       message(
         "Native playback failed. Trying Compatibility at the same position…",
       );
@@ -8348,6 +8497,7 @@
         options.positionTicks != null ? options.positionTicks : stopped.completedPositionTicks != null ? stopped.completedPositionTicks : position();
     hideUpNext();
     hideSegment();
+    disposeSeekTiles(stopped);
     playing = null;
     livePreview = false;
     document.body.classList.remove("live-preview");
@@ -8488,14 +8638,110 @@
   }
   function hideSeekFeedback() {
     clearTimeout(seekFeedbackTimer);
+    seekPreviewRequest++;
     document.getElementById("seek-feedback").hidden = true;
+    document.getElementById("seek-preview").hidden = true;
+    if (playing && playing.seekTiles) playing.seekTiles.wanted = null;
     if (seekState) seekState.delta = 0;
   }
   function clearSeekState() {
     clearTimeout(seekCommitTimer);
     hideSeekFeedback();
     seekState = null;
+    seekHold = null;
   }
+  function disposeSeekTiles(active) {
+    var state = active && active.seekTiles;
+    if (!state) return;
+    state.wanted = null;
+    state.cache.clear();
+    var job = state.pending;
+    if (job) {
+      job.closed = true; job.controller.abort(); clearTimeout(job.timer);
+      if (job.image) { job.image.onload = job.image.onerror = null; job.image.src = ""; }
+      if (job.url) URL.revokeObjectURL(job.url);
+      state.pending = null;
+    }
+  }
+  function loadSeekTile(active) {
+    var state = active.seekTiles, info = active.trickplayInfo, wanted = state && state.wanted;
+    if (playing !== active || active.live || !wanted || !info || wanted.request !== seekPreviewRequest) return;
+    var frame = C.trickplayFrame(info, wanted.target), cached = state.cache.get(frame.sheet);
+    function draw(image) {
+      if (playing !== active || !state.wanted || state.wanted.request !== seekPreviewRequest || document.getElementById("seek-feedback").hidden) return;
+      var current = C.trickplayFrame(info, state.wanted.target);
+      if (current.sheet !== frame.sheet || image.naturalWidth < current.x + current.width || image.naturalHeight < current.y + current.height) return;
+      var canvas = document.getElementById("seek-thumbnail"), scale = Math.min(320 / current.width, 180 / current.height),
+        preview = document.getElementById("seek-preview");
+      canvas.width = Math.round(current.width * scale); canvas.height = Math.round(current.height * scale);
+      canvas.style.width = canvas.width + "px"; canvas.style.height = canvas.height + "px";
+      canvas.getContext("2d").drawImage(image, current.x, current.y, current.width, current.height, 0, 0, canvas.width, canvas.height);
+      preview.style.width = canvas.width + 4 + "px"; preview.style.marginLeft = -(canvas.width + 4) / 2 + "px";
+      canvas.dataset.sheet = String(current.sheet); canvas.dataset.x = String(current.x); canvas.dataset.y = String(current.y);
+      preview.hidden = false;
+    }
+    if (cached) { state.cache.delete(frame.sheet); state.cache.set(frame.sheet, cached); draw(cached); return; }
+    if (state.pending || state.failed.has(frame.sheet)) return;
+    var job = {sheet: frame.sheet, controller: new AbortController()}; state.pending = job;
+    function finish(image) {
+      if (job.closed) return;
+      job.closed = true; clearTimeout(job.timer);
+      if (job.image) job.image.onload = job.image.onerror = null;
+      if (job.url) URL.revokeObjectURL(job.url);
+      if (state.pending === job) state.pending = null;
+      if (playing !== active) return;
+      if (image && image.naturalWidth > 0 && image.naturalHeight > 0 && image.naturalWidth <= 4096 && image.naturalHeight <= 4096 && image.naturalWidth * image.naturalHeight <= 8388608) {
+        state.cache.set(frame.sheet, image);
+        while (state.cache.size > 2) state.cache.delete(state.cache.keys().next().value);
+        draw(image);
+      } else {
+        state.failed.add(frame.sheet);
+        if (state.failed.size > 20) state.failed.delete(state.failed.values().next().value);
+      }
+      if (state.wanted && C.trickplayFrame(info, state.wanted.target).sheet !== frame.sheet) loadSeekTile(active);
+    }
+    api("/Videos/" + encodeURIComponent(active.item.Id) + "/Trickplay/" + info.Width + "/" + frame.sheet + ".jpg",
+      {mediaSourceId: info.sourceId}, null, "GET", {session: active.account, signal: job.controller.signal, imageBlob: true, timeoutMs: 2500})
+      .then(function (blob) {
+        if (job.closed || playing !== active) return;
+        job.image = new Image(); job.url = URL.createObjectURL(blob);
+        job.image.onload = function () { finish(job.image); }; job.image.onerror = function () { finish(null); };
+        job.timer = setTimeout(function () { finish(null); }, 2000);
+        job.image.src = job.url;
+      }).catch(function (error) {
+        if (error.status === 401 || error.status === 403) active.trickplayInfo = null;
+        finish(null);
+      });
+  }
+  function showSeekPreview(target, timeline) {
+    if (!playing) return;
+    var feedback = document.getElementById("seek-feedback");
+    feedback.classList.toggle("is-timeline", !!timeline);
+    document.getElementById("seek-preview").hidden = true;
+    document.getElementById("seek-target").textContent = formatTime(target);
+    if (timeline) feedback.setAttribute("aria-label", "Seek to " + formatTime(target));
+    feedback.hidden = false;
+    var request = ++seekPreviewRequest;
+    if (!playing.live && playing.seekTiles) { playing.seekTiles.wanted = {target: target, request: request}; loadSeekTile(playing); }
+    clearTimeout(seekFeedbackTimer);
+    seekFeedbackTimer = setTimeout(hideSeekFeedback, 800);
+  }
+  function remoteSeek(key, event, minimal) {
+    if (!playing || !playing.started || playing.awaitingWatching) { seekHold = null; return; }
+    var now = Date.now(), base = key === 37 || key === 39 ? 10 : 30;
+    if (!seekHold || seekHold.key !== key || seekHold.active !== playing || now - seekHold.last > 1000)
+      seekHold = {key: key, active: playing, start: now, step: 0};
+    var held = now - seekHold.start, repeating = event.repeat || held > 350;
+    seekHold.last = now;
+    if (repeating && now - seekHold.step < 150) return;
+    seekHold.step = now;
+    var step = playing && !playing.live ? C.heldSeekStep(base, held) : base;
+    seek(key === 37 || key === 412 ? -step : step, minimal);
+  }
+  document.addEventListener("keyup", function (event) {
+    if (seekHold && P.keyCode(event) === seekHold.key) seekHold = null;
+  });
+  window.addEventListener("blur", function () { seekHold = null; });
   function seek(seconds, minimal) {
     if (!playing || !playing.started || playing.awaitingWatching) return;
     var range = liveSeekWindow();
@@ -8533,10 +8779,9 @@
       document.getElementById("seek-seconds").textContent = String(Math.round(Math.abs(state.delta)));
       feedback.setAttribute("aria-label", (state.delta < 0 ? "Back " : "Forward ") + Math.round(Math.abs(state.delta)) + " seconds");
       document.querySelector("#seek-progress div").style.width = Math.max(0, Math.min(100, (target - start) / (end - start) * 100)) + "%";
-      feedback.hidden = false;
-      clearTimeout(seekFeedbackTimer);
-      seekFeedbackTimer = setTimeout(hideSeekFeedback, 800);
+      showSeekPreview(target, false);
     }
+    else if (!playing.live) showSeekPreview(target, true);
   }
   document.getElementById("timeline").oninput = function () {
     if (!playing || !playing.started || playing.awaitingWatching) return;
@@ -8550,6 +8795,7 @@
       );
     } else video.currentTime = Number(this.value);
     showControls();
+    if (!playing.live) showSeekPreview(Number(this.value), true);
   };
   document.getElementById("timeline").onchange = function () {
     run(function () {
@@ -8559,6 +8805,19 @@
   document.getElementById("toggle").onclick = function () {
     run(toggle);
   };
+  video.addEventListener("ember-media-command", function (event) {
+    if (!playing || !playing.started || document.hidden || busy || playing.awaitingWatching) return;
+    var command = event.detail || {};
+    if (command.action === "play" && video.paused) run(toggle);
+    else if (command.action === "pause" && !video.paused) { video.pause(); showControls(); }
+    else if (command.action === "stop") run(stop);
+    else if (command.action === "next" || command.action === "previous") {
+      var control = document.getElementById(command.action + "-video");
+      if (!control.disabled && !control.hidden) control.click();
+    } else if (!playing.live && command.action === "seek" && Number.isFinite(command.position)) seek(command.position / 1000 - video.currentTime);
+    else if (!playing.live && command.action === "forward") seek(10);
+    else if (!playing.live && command.action === "rewind") seek(-10);
+  });
   document.getElementById("rewind").onclick = function () {
     seek(-30);
   };
@@ -8627,6 +8886,7 @@
   }
   document.addEventListener("keydown", function (e) {
     var key = P.keyCode(e);
+    if ([37, 39, 412, 417].indexOf(key) < 0) seekHold = null;
     if (subtitleSearch && !subtitleSearch.hidden) {
       if (key === 461 || key === 27) { e.preventDefault(); closeSubtitleSearch(); }
       else if (key >= 37 && key <= 40) {
@@ -8728,7 +8988,7 @@
         document.getElementById("controls").style.opacity === "0";
       if (!panelOpen && controlsHidden && [37, 39, 412, 417].indexOf(key) >= 0) {
         e.preventDefault();
-        seek(key === 37 ? -10 : key === 39 ? 10 : key === 412 ? -30 : 30, true);
+        remoteSeek(key, e, true);
         return;
       }
       if (!panelOpen && controlsHidden && key === 13 && !skipSegment.hidden) {
@@ -8744,7 +9004,7 @@
         (key === 37 || key === 39)
       ) {
         e.preventDefault();
-        seek(key === 37 ? -10 : 10);
+        remoteSeek(key, e, false);
         return;
       }
       if (controlsHidden && key === 13) {
@@ -8790,7 +9050,7 @@
       }
       if (!panelOpen && (key === 412 || key === 417)) {
         e.preventDefault();
-        seek(key === 412 ? -30 : 30);
+        remoteSeek(key, e, false);
         return;
       }
     }
