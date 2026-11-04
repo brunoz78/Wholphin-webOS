@@ -631,6 +631,21 @@ await patch(
     "      var decoder = decoderOptions(),",
   "Rewind on resume",
 );
+// List view as in Plex (fork/extras.js): cards keep their item for year, runtime and description,
+// and library pages load the description with the items.
+await patch(
+  "app.js",
+  '      b.setAttribute("aria-label", item.Name);',
+  '      b.setAttribute("aria-label", item.Name);\n' +
+    "      b.forkItem = item;",
+  "Cards keep their item",
+);
+await patch(
+  "app.js",
+  '            seasonContext ? { Fields: "Overview,PrimaryImageAspectRatio" } : {},',
+  '            seasonContext ? { Fields: "Overview,PrimaryImageAspectRatio" } : { Fields: "Overview,ChildCount" },',
+  "Library pages load descriptions",
+);
 // List view of libraries (fork/extras.js): the virtual grid needs the list's row height.
 await patch(
   "app.js",

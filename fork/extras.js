@@ -76,8 +76,31 @@
   }
 
   // ---- list view for libraries --------------------------------------------------------
+  // One title per row as in Plex: poster, title, "2008 · 1h 55min" and two lines of description.
   // Card height in the list (CSS .fork-list-view) plus the grid's row gap.
-  window.WholphinListRow = 165 + 32;
+  window.WholphinListRow = 200 + 24;
+
+  function runtime(ticks) {
+    var minutes = Math.round((ticks || 0) / 600000000);
+    if (!minutes) return "";
+    var h = Math.floor(minutes / 60),
+      m = minutes % 60;
+    return h ? h + "h " + (m ? m + "min" : "") : m + "min";
+  }
+  // Adds year, runtime and description to the cards the app draws (it keeps the item on the card).
+  function decorate(grid) {
+    Array.prototype.forEach.call(grid.querySelectorAll(".card"), function (card) {
+      var item = card.forkItem;
+      if (!item || card.querySelector(".fork-list-meta")) return;
+      var facts = [];
+      if (item.ProductionYear) facts.push(item.ProductionYear);
+      if (item.Type === "Series" && item.ChildCount)
+        facts.push(item.ChildCount + (item.ChildCount === 1 ? t(" season", " Staffel") : t(" seasons", " Staffeln")));
+      else if (item.Type !== "Series" && runtime(item.RunTimeTicks)) facts.push(runtime(item.RunTimeTicks));
+      el("span", "fork-list-meta", facts.join(" · "), card).setAttribute("data-no-i18n", "");
+      if (item.Overview) el("span", "fork-list-overview", item.Overview, card).setAttribute("data-no-i18n", "");
+    });
+  }
 
   function listMode() {
     return read(VIEW_KEY, "grid") === "list";
@@ -86,6 +109,7 @@
     var main = document.getElementById("main"),
       grid = main && main.querySelector("#library-items .library-grid");
     var on = !!grid && !grid.classList.contains("episode-grid") && listMode();
+    if (on) decorate(grid);
     if (main && main.classList.contains("fork-list-view") !== on) {
       main.classList.toggle("fork-list-view", on);
       // The library's virtual grid recomputes its rows on resize.
