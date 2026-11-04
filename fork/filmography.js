@@ -157,6 +157,18 @@
             rows.firstElementChild.focus();
             rows.firstElementChild.scrollIntoView({ block: "nearest" });
           });
+        // Without library titles, down from "More" (the biography) leads to the list.
+        if (!ctx.grid) {
+          var page = section.parentNode;
+          page.addEventListener("keydown", function fromMore(event) {
+            if (!ctx.valid()) return page.removeEventListener("keydown", fromMore);
+            if (event.keyCode !== 40 || !rows.firstElementChild || !document.activeElement.closest(".fork-more-actions")) return;
+            event.preventDefault();
+            event.stopPropagation();
+            rows.firstElementChild.focus();
+            rows.firstElementChild.scrollIntoView({ block: "nearest" });
+          });
+        }
         rows.addEventListener("keydown", function (event) {
           var key = event.keyCode, row = document.activeElement;
           if (key !== 38 && key !== 40) return;
@@ -164,7 +176,7 @@
           event.stopPropagation();
           var next = key === 40 ? row.nextElementSibling : row.previousElementSibling;
           if (!next && key === 38) {
-            var card = ctx.grid && ctx.grid.querySelector(".card");
+            var card = (ctx.grid && ctx.grid.querySelector(".card")) || document.getElementById("fork-more");
             if (card) {
               card.focus();
               card.scrollIntoView({ block: "nearest" });
@@ -246,82 +258,54 @@
   };
 
   // ---- setting: TMDB key -------------------------------------------------------------------
+  var keyDialogOpen = false;
   function openKeyDialog(row, render) {
-    if (document.getElementById("fork-tmdb-dialog")) return;
-    var dialog = el("section", null, null, document.body);
-    dialog.id = "fork-tmdb-dialog";
-    dialog.className = "fork-dialog";
-    dialog.setAttribute("role", "dialog");
-    dialog.setAttribute("data-no-i18n", "");
-    var box = el("div", "fork-exit-box fork-tmdb-box", null, dialog);
-    el("h2", null, t("TMDB key", "TMDB-Schlüssel"), box);
-    el("p", "metadata", t(
-      "API key or API read access token from themoviedb.org (Settings → API). Stored on this TV only.",
-      "API-Schlüssel oder API-Lesezugriffstoken von themoviedb.org (Einstellungen → API). Bleibt nur auf diesem TV gespeichert.",
-    ), box);
-    var input = el("input", "fork-tmdb-input", null, box);
-    input.type = "text";
-    input.value = tmdbKey();
-    input.setAttribute("autocomplete", "off");
-    input.setAttribute("spellcheck", "false");
-    var message = el("p", "metadata fork-tmdb-message", null, box),
-      buttons = el("div", "fork-exit-buttons", null, box),
-      save = el("button", null, t("Check and save", "Prüfen und speichern"), buttons),
-      remove = el("button", null, t("Remove", "Entfernen"), buttons),
-      cancel = el("button", null, t("Cancel", "Abbrechen"), buttons);
-    function close() {
-      dialog.remove();
-      render();
-      row.focus();
-    }
-    save.onclick = function () {
-      var key = input.value.trim();
-      if (!key) return;
-      message.textContent = t("Checking…", "Wird geprüft …");
-      tmdb("/configuration", key).then(
-        function () {
-          try {
-            localStorage.setItem(KEY, key);
-          } catch (_) {}
-          close();
+    if (keyDialogOpen || !window.WholphinDialog) return;
+    keyDialogOpen = true;
+    window.WholphinDialog({
+      title: t("TMDB key", "TMDB-Schlüssel"),
+      text: t(
+        "API key or API read access token from themoviedb.org (Settings → API). Stored on this TV only.",
+        "API-Schlüssel oder API-Lesezugriffstoken von themoviedb.org (Einstellungen → API). Bleibt nur auf diesem TV gespeichert.",
+      ),
+      input: { value: tmdbKey() },
+      boxClass: "fork-tmdb-box",
+      buttons: [
+        {
+          label: t("Check and save", "Prüfen und speichern"),
+          action: function (d) {
+            var key = d.input.value.trim();
+            if (!key) return Promise.resolve();
+            d.message.textContent = t("Checking…", "Wird geprüft …");
+            return tmdb("/configuration", key).then(
+              function () {
+                try {
+                  localStorage.setItem(KEY, key);
+                } catch (_) {}
+                d.close();
+              },
+              function () {
+                d.message.textContent = t("TMDB does not accept this key.", "TMDB akzeptiert diesen Schlüssel nicht.");
+              },
+            );
+          },
         },
-        function () {
-          message.textContent = t("TMDB does not accept this key.", "TMDB akzeptiert diesen Schlüssel nicht.");
+        {
+          label: t("Remove", "Entfernen"),
+          action: function () {
+            try {
+              localStorage.removeItem(KEY);
+            } catch (_) {}
+          },
         },
-      );
-    };
-    remove.onclick = function () {
-      try {
-        localStorage.removeItem(KEY);
-      } catch (_) {}
-      close();
-    };
-    cancel.onclick = close;
-    // The dialog keeps the keys: up/down between field and buttons, left/right between buttons.
-    dialog.addEventListener("keydown", function (event) {
-      var key = event.keyCode,
-        active = document.activeElement,
-        list = [save, remove, cancel];
-      event.stopPropagation();
-      if (key === 461 || key === 27) {
-        event.preventDefault();
-        close();
-      } else if (key === 13 && active === input) {
-        event.preventDefault();
-        save.click();
-      } else if (key === 40 && active === input) {
-        event.preventDefault();
-        save.focus();
-      } else if (key === 38 && active !== input) {
-        event.preventDefault();
-        input.focus();
-      } else if ((key === 37 || key === 39) && active !== input) {
-        event.preventDefault();
-        var at = list.indexOf(active);
-        list[(at + (key === 37 ? list.length - 1 : 1)) % list.length].focus();
-      }
+        { label: t("Cancel", "Abbrechen") },
+      ],
+      onClose: function () {
+        keyDialogOpen = false;
+        render();
+        row.focus();
+      },
     });
-    input.focus();
   }
 
   function mountSetting() {

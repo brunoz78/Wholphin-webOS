@@ -55,13 +55,23 @@
     if (token) h["X-Plex-Token"] = token;
     return h;
   }
-  function request(method, url) {
-    return fetch(url, { method: method, headers: headers(), credentials: "omit" }).then(function (r) {
-      if (r.status === 401) {
-        var data = load();
+  // A refused call does not sign out by itself: only when plex.tv also refuses the account
+  // (token revoked or expired) is the token forgotten.
+  function checkAccount() {
+    var token = load().token;
+    if (!token) return;
+    fetch(PLEX_TV + "/user", { headers: headers(), credentials: "omit" }).then(function (r) {
+      var data = load();
+      if (r.status === 401 && data.token === token) {
         delete data.token;
+        delete data.name;
         save(data);
       }
+    }, function () {});
+  }
+  function request(method, url) {
+    return fetch(url, { method: method, headers: headers(), credentials: "omit" }).then(function (r) {
+      if (r.status === 401 && url.indexOf(PLEX_TV + "/pins") !== 0) checkAccount();
       if (!r.ok) throw new Error("Plex " + r.status);
       return r.status === 204 ? {} : r.text().then(function (text) {
         return text ? JSON.parse(text) : {};
@@ -147,36 +157,26 @@
   }
 
   // ---- sign-in with a code on plex.tv/link ----------------------------------------------------
+  var dialogOpen = false;
   function signIn(done) {
-    if (document.getElementById("fork-plex-dialog")) return;
-    var opener = document.activeElement,
-      dialog = el("section", "fork-dialog", null, document.body);
-    dialog.id = "fork-plex-dialog";
-    dialog.setAttribute("role", "dialog");
-    dialog.setAttribute("data-no-i18n", "");
-    var box = el("div", "fork-exit-box", null, dialog);
-    el("h2", null, t("Sign in with Plex", "Mit Plex anmelden"), box);
-    var info = el("p", "metadata", t("Requesting a code…", "Code wird angefordert …"), box),
-      code = el("p", "fork-plex-code", null, box),
-      buttons = el("div", "fork-exit-buttons", null, box),
-      cancel = el("button", null, t("Cancel", "Abbrechen"), buttons),
-      timer = null,
-      stopped = false;
-    function close() {
-      stopped = true;
-      clearTimeout(timer);
-      dialog.remove();
-      if (opener && opener.isConnected) opener.focus();
-    }
-    cancel.onclick = close;
-    dialog.addEventListener("keydown", function (event) {
-      event.stopPropagation();
-      if (event.keyCode === 461 || event.keyCode === 27) {
-        event.preventDefault();
-        close();
-      }
-    });
-    cancel.focus();
+    if (dialogOpen || !window.WholphinDialog) return;
+    dialogOpen = true;
+    var timer = null,
+      stopped = false,
+      d = window.WholphinDialog({
+        title: t("Sign in with Plex", "Mit Plex anmelden"),
+        buttons: [{ label: t("Cancel", "Abbrechen") }],
+        onClose: function () {
+          stopped = true;
+          dialogOpen = false;
+          clearTimeout(timer);
+        },
+      }),
+      info = d.message,
+      code = el("p", "fork-plex-code");
+    d.box.insertBefore(code, info.nextSibling);
+    info.textContent = t("Requesting a code…", "Code wird angefordert …");
+    var close = d.close;
     request("POST", PLEX_TV + "/pins?strong=false")
       .then(function (pin) {
         if (stopped) return;
@@ -255,6 +255,7 @@
           status.remove();
           var list = el("button", "fork-plex-watchlist", null, row),
             seen = el("button", "fork-plex-watched", null, row);
+          var problem = el("p", "metadata fork-plex-problem", null, row);
           function render() {
             list.textContent = state.watchlisted ? t("✓ On watchlist", "✓ Auf der Merkliste") : t("Add to watchlist", "Zur Merkliste hinzufügen");
             seen.textContent = state.watched ? t("✓ Watched", "✓ Gesehen") : t("Mark as watched", "Als gesehen markieren");
@@ -264,11 +265,14 @@
           function toggle(button, field, action) {
             button.onclick = function () {
               button.disabled = true;
+              problem.textContent = "";
               action(ratingKey, !state[field])
                 .then(function () {
                   state[field] = !state[field];
                 })
-                .catch(function () {})
+                .catch(function () {
+                  problem.textContent = t("Plex did not save this. Try again later.", "Plex hat das nicht gespeichert. Versuche es später erneut.");
+                })
                 .then(function () {
                   button.disabled = false;
                   render();
@@ -333,41 +337,28 @@
   };
 
   function confirmSignOut(row, render) {
-    if (document.getElementById("fork-plex-dialog")) return;
-    var dialog = el("section", "fork-dialog", null, document.body);
-    dialog.id = "fork-plex-dialog";
-    dialog.setAttribute("role", "dialog");
-    dialog.setAttribute("data-no-i18n", "");
-    var box = el("div", "fork-exit-box", null, dialog);
-    el("h2", null, t("Sign out of Plex?", "Von Plex abmelden?"), box);
-    var buttons = el("div", "fork-exit-buttons", null, box),
-      out = el("button", null, t("Sign out", "Abmelden"), buttons),
-      cancel = el("button", null, t("Cancel", "Abbrechen"), buttons);
-    function close() {
-      dialog.remove();
-      render();
-      row.focus();
-    }
-    out.onclick = function () {
-      var data = load();
-      delete data.token;
-      delete data.name;
-      save(data);
-      close();
-    };
-    cancel.onclick = close;
-    dialog.addEventListener("keydown", function (event) {
-      var key = event.keyCode;
-      event.stopPropagation();
-      if (key === 461 || key === 27) {
-        event.preventDefault();
-        close();
-      } else if (key >= 37 && key <= 40) {
-        event.preventDefault();
-        (document.activeElement === out ? cancel : out).focus();
-      }
+    if (dialogOpen || !window.WholphinDialog) return;
+    dialogOpen = true;
+    window.WholphinDialog({
+      title: t("Sign out of Plex?", "Von Plex abmelden?"),
+      buttons: [
+        {
+          label: t("Sign out", "Abmelden"),
+          action: function () {
+            var data = load();
+            delete data.token;
+            delete data.name;
+            save(data);
+          },
+        },
+        { label: t("Cancel", "Abbrechen") },
+      ],
+      focus: 1,
+      onClose: function () {
+        dialogOpen = false;
+        render();
+      },
     });
-    cancel.focus();
   }
 
   // ---- setting: Plex account in "Movie data" --------------------------------------------------

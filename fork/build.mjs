@@ -45,6 +45,7 @@ await fs.copyFile(path.join(fork, "playback/stats.js"), path.join(out, "stats.js
 await fs.copyFile(path.join(fork, "login.js"), path.join(out, "login.js"));
 await fs.copyFile(path.join(fork, "nav.js"), path.join(out, "nav.js"));
 await fs.copyFile(path.join(fork, "extras.js"), path.join(out, "extras.js"));
+await fs.copyFile(path.join(fork, "dialog.js"), path.join(out, "dialog.js"));
 await fs.copyFile(path.join(fork, "exit.js"), path.join(out, "exit.js"));
 await fs.copyFile(path.join(fork, "overview.js"), path.join(out, "overview.js"));
 await fs.copyFile(path.join(fork, "filmography.js"), path.join(out, "filmography.js"));
@@ -63,7 +64,7 @@ html = html
   .replace(
     appHook,
     '<script src="pgs.js"></script>\n    <script src="codecs.js"></script>\n    <script src="login.js"></script>\n    ' + appHook +
-      '\n    <script src="stats.js"></script>\n    <script src="nav.js"></script>\n    <script src="extras.js"></script>\n    <script src="exit.js"></script>\n    <script src="overview.js"></script>\n    <script src="filmography.js"></script>\n    <script src="plex.js"></script>',
+      '\n    <script src="stats.js"></script>\n    <script src="dialog.js"></script>\n    <script src="nav.js"></script>\n    <script src="extras.js"></script>\n    <script src="exit.js"></script>\n    <script src="overview.js"></script>\n    <script src="filmography.js"></script>\n    <script src="plex.js"></script>',
   )
   // Theme music must exist before the app opens its first page.
   .replace(
@@ -551,12 +552,62 @@ await patch(
     "      }",
   "Movie page: subtitles in the button row",
 );
+// Remote on the subtitle choice in a button row: left to the button before it, right stays, down to
+// the cast, up like the other buttons (the original sent every direction to the first button).
+// Handled before the app's own key handler, which would move the focus a second time.
+await patch(
+  "app.js",
+  "  async function seasonsPage(seriesId) {",
+  "  function forkSubtitleKey(key, e) {\n" +
+    "    var picker = document.activeElement, mount = picker.closest(\".fork-subtitle-action\");\n" +
+    "    if (!mount || key < 37 || key > 40) return false;\n" +
+    "    e.preventDefault();\n" +
+    "    var first = mount.parentNode.querySelector(\"button\");\n" +
+    "    if (key === 37 && mount.previousElementSibling) focusContent(mount.previousElementSibling);\n" +
+    "    else if (key === 40) {\n" +
+    "      var cast = main.querySelector(\".cast-row\");\n" +
+    "      if (cast) { cast.castReturnFocus = picker; focusContent(cast.querySelector(\"figure\")); }\n" +
+    "    } else if (key === 38 && first && first !== picker) {\n" +
+    "      first.focus();\n" +
+    "      first.dispatchEvent(new KeyboardEvent(\"keydown\", { keyCode: 38, which: 38, bubbles: true, cancelable: true }));\n" +
+    "    }\n" +
+    "    return true;\n" +
+    "  }\n" +
+    "  window.addEventListener(\"keydown\", function (e) {\n" +
+    "    var active = document.activeElement;\n" +
+    "    if (active && active.id === \"detail-subtitles\" && (!playing || livePreview) && forkSubtitleKey(P.keyCode(e), e)) e.stopPropagation();\n" +
+    "  }, true);\n" +
+    "  async function seasonsPage(seriesId) {",
+  "Subtitle choice in the row: arrow keys",
+);
+
 // Up from the buttons of a movie led to the subtitle choice above them; it is in the row now.
 await patch(
   "app.js",
   '    if ((!playing || livePreview) && main.classList.contains("movie-detail") && key === 38 && active.closest(".actions")) {',
   '    if ((!playing || livePreview) && main.classList.contains("movie-detail") && key === 38 && active.closest(".actions") && !main.querySelector(".fork-subtitle-action")) {',
   "Movie page: up from the buttons",
+);
+
+// Collections show how many movies they hold ("3 movies") instead of a year: requests that load
+// only collections (the collections tab) also ask Jellyfin for the number of children. Other
+// lists are left alone, the count costs the server work per item.
+await patch(
+  "app.js",
+  "  async function api(path, values, body, method, options) {",
+  "  async function api(path, values, body, method, options) {\n" +
+    "    if (values && values.IncludeItemTypes === \"BoxSet\" && values.Fields && !/ChildCount/.test(values.Fields))\n" +
+    "      values = Object.assign({}, values, { Fields: values.Fields + \",ChildCount\" });",
+  "Collections: ask for the number of movies",
+);
+await patch(
+  "app.js",
+  "        : item.ProductionYear;",
+  "        : item.Type === \"BoxSet\"\n" +
+    // Card subtitles are not translated at runtime (titles live there), so it is translated here.
+    "        ? (item.ChildCount ? (window.wholphinI18n ? window.wholphinI18n.t : String)(item.ChildCount + (item.ChildCount === 1 ? \" movie\" : \" movies\")) : \"\")\n" +
+    "        : item.ProductionYear;",
+  "Collections: number of movies instead of a year",
 );
 
 // Rewind on resume (fork/extras.js): resuming starts a few seconds before the saved position.

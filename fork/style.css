@@ -310,6 +310,16 @@
   margin-top: 32px;
 }
 
+/* Menu of a navigation entry (fork/nav.js): buttons below each other. */
+.fork-nav-buttons button {
+  display: block;
+  width: 360px;
+  margin: 10px auto;
+}
+.fork-nav-buttons button:disabled {
+  opacity: 0.35;
+}
+
 /* Checkboxes (e.g. "Customize Home"): the TV draws native checkboxes without a check mark,
    so every box looked empty. Drawn here: violet with a white check when on. */
 #main input[type="checkbox"] {
