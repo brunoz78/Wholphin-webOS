@@ -100,23 +100,6 @@
     return { native: true, reason: "Dolby Vision played as its base layer" };
   };
 
-  // The original turns direct play off whenever it applies an audio or subtitle choice, even when
-  // the choice is the file's default audio track and subtitles are off or drawn by the TV itself.
-  // The server then reports "DirectPlayError" and remuxes. Direct play only needs a remux when
-  // another audio track than the file's default is wanted (the TV plays the default track).
-  window.WholphinNeedsRemux = function (options, source) {
-    if (!options || options.audioIndex == null || !source) return false;
-    var audio = (source.MediaStreams || []).filter(function (s) {
-      return s.Type === "Audio";
-    });
-    var fallback = audio.find(function (s) {
-      return s.IsDefault;
-    }) || audio[0];
-    var defaultIndex =
-      source.DefaultAudioStreamIndex != null ? source.DefaultAudioStreamIndex : fallback && fallback.Index;
-    return options.audioIndex !== defaultIndex;
-  };
-
   // Playback info: names for dynamic ranges the original shows as "Unknown".
   var RANGES = {
     DOVIWithHDR10Plus: "Dolby Vision + HDR10+ base",

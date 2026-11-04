@@ -12,5 +12,6 @@
  "section:not([hidden]) button", "server-error server-example", "tv-category-page tv-library-page",
  "{0}:favorite", "{0}:retry", "{0}:watch", "{0}continue", "{0}favorite-movies", "{0}favorite-series", "{0}next", "{0}px", "{0}vw",
  "kids shows", "kids tv", "tv shows", "valentine's day",
- "Forward", "Intro", "Intro,Outro", "Outro", "Skip {0}", "{0} seconds", "· OK"
+ "Forward", "Intro", "Intro,Outro", "Outro", "Skip {0}", "{0} seconds", "· OK",
+ "10 Mbps", "2 Mbps", "20 Mbps", "40 Mbps", "5 Mbps", "60 Mbps", "Chapters,MediaSources,MediaStreams,Trickplay", "{0}-video"
 ]

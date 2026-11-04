@@ -49,7 +49,7 @@
         actions.className = "actions fork-more-actions";
         text.parentNode.insertBefore(actions, text.nextSibling);
       }
-      actions.appendChild(more);
+      actions.insertBefore(more, actions.querySelector(".fork-subtitle-action")); // subtitles stay last
       // A person page starts on "More" (the biography) instead of the first movie below it.
       var active = document.activeElement;
       if (main.classList.contains("fork-person-page") && active && active.closest(".season-grid") && active === active.parentNode.firstElementChild)

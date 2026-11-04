@@ -93,21 +93,7 @@ await patch(
   "Subtitle defaults",
 );
 
-// Direct play also with an applied track choice, see WholphinNeedsRemux in playback/codecs.js.
-await patch(
-  "app.js",
-  "(!!options.trackChange || !!subtitleCues || !!options.applyPreferences)",
-  "(!!options.trackChange || !!(window.WholphinNeedsRemux ? window.WholphinNeedsRemux(options, sourceMetadata) : (subtitleCues || options.applyPreferences)))",
-  "Direct play with track choice",
-);
-
-// Native playback is the default on LG (the original starts in Compatibility: H.264, at most 1080p).
-await patch(
-  "app.js",
-  "native: !!P.playbackPolicy,",
-  "native: true,",
-  "Native playback by default",
-);
+// Native playback by default and direct play with a track choice come from the original since 0.2.93.
 // Watched check marks and episodes opening in the season view come from the original since 0.2.82.
 
 // A playlist or a collection opens its items directly instead of its detail page.
@@ -537,6 +523,40 @@ await patch(
     "        }\n" +
     "        if (actions.contains(active) && key === 38) {",
   "Season view: buttons down to the cast",
+);
+
+// Collections tab of a library: a collection opens its own page, not a filtered listing.
+await patch(
+  "app.js",
+  "        cards(fresh, grid, null, grid, function (entry) {",
+  "        cards(fresh, grid, null, grid, function (entry) {\n" +
+    "          if (tab === \"collections\") return go(function () { return forkCollection(entry); });",
+  "Collections tab opens the collection page",
+);
+
+// Movie page: the subtitle choice sits in the button row, as in the season view. It stays last
+// when the app adds more buttons later.
+await patch(
+  "app.js",
+  "      var detailSubtitleOptions = subtitles.options;",
+  "      var detailSubtitleOptions = subtitles.options;\n" +
+    "      var forkSubtitles = subtitlePicker.closest(\".detail-subtitle-settings\");\n" +
+    "      if (forkSubtitles) {\n" +
+    "        var forkMount = el(\"div\", null, actions);\n" +
+    "        forkMount.className = \"fork-subtitle-action\";\n" +
+    "        forkMount.appendChild(forkSubtitles);\n" +
+    "        new MutationObserver(function () {\n" +
+    "          if (actions.lastElementChild !== forkMount) actions.appendChild(forkMount);\n" +
+    "        }).observe(actions, { childList: true });\n" +
+    "      }",
+  "Movie page: subtitles in the button row",
+);
+// Up from the buttons of a movie led to the subtitle choice above them; it is in the row now.
+await patch(
+  "app.js",
+  '    if ((!playing || livePreview) && main.classList.contains("movie-detail") && key === 38 && active.closest(".actions")) {',
+  '    if ((!playing || livePreview) && main.classList.contains("movie-detail") && key === 38 && active.closest(".actions") && !main.querySelector(".fork-subtitle-action")) {',
+  "Movie page: up from the buttons",
 );
 
 // Rewind on resume (fork/extras.js): resuming starts a few seconds before the saved position.
