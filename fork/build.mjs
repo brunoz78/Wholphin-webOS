@@ -263,11 +263,14 @@ await patch(
     "      api(\"/Users/\" + session.user + \"/Items\", {\n" +
     "        ParentId: item.Id,\n" +
     "        SortBy: \"ProductionYear,PremiereDate,SortName\",\n" +
-    "        Fields: \"PrimaryImageAspectRatio,ProductionYear,UserData\",\n" +
+    "        Fields: \"PrimaryImageAspectRatio,ProductionYear,PremiereDate,SortName,UserData\",\n" +
     "      }),\n" +
     "    ]);\n" +
     "    if (r !== revision) return;\n" +
     "    var full = data[0], movies = data[1].Items || [];\n" +
+    // The server keeps a collection's own order and ignores SortBy, so sort by release here.
+    "    function forkReleased(m) { return m.PremiereDate || (m.ProductionYear ? m.ProductionYear + \"-12-31\" : \"9999\"); }\n" +
+    "    movies.sort(function (a, b) { var x = forkReleased(a), y = forkReleased(b); return x < y ? -1 : x > y ? 1 : String(a.SortName || a.Name).localeCompare(String(b.SortName || b.Name)); });\n" +
     "    main.className = \"detail-page fork-collection-page\";\n" +
     "    setBackdrop(full);\n" +
     "    if (full.ImageTags && full.ImageTags.Primary) {\n" +
@@ -339,7 +342,7 @@ await patch(
     "        IncludeItemTypes: \"Movie,Series\",\n" +
     "        SortBy: \"ProductionYear,SortName\",\n" +
     "        SortOrder: \"Descending\",\n" +
-    "        Fields: \"PrimaryImageAspectRatio,ProductionYear,UserData\",\n" +
+    "        Fields: \"PrimaryImageAspectRatio,ProductionYear,PremiereDate,SortName,UserData\",\n" +
     "      }),\n" +
     "    ]);\n" +
     "    if (r !== revision) return;\n" +
@@ -537,6 +540,13 @@ await patch(
   "        cards(fresh, grid, null, grid, function (entry) {\n" +
     "          if (tab === \"collections\") return go(function () { return forkCollection(entry); });",
   "Collections tab opens the collection page",
+);
+// The "Collections" row on a movie page opens the same collection page.
+await patch(
+  "app.js",
+  "              return listing(collection.Id, collection.Name);",
+  "              return forkCollection(collection);",
+  "Collection row of a movie opens the collection page",
 );
 
 // Movie page: the subtitle choice sits in the button row, as in the season view. It stays last
