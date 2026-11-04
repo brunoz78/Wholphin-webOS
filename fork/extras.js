@@ -75,6 +75,70 @@
     anchor.parentNode.insertBefore(row, anchor.nextSibling);
   }
 
+  // ---- playback queue on/off ------------------------------------------------------------
+  // Off by default: the buttons "Add to queue", "View playback queue", the settings row and the
+  // player's "Queue" button go away. Episodes still play on one after another (autoplay).
+  var QUEUE_KEY = "wholphin-fork-queue",
+    QUEUE_SELECTOR =
+      '#main [aria-label="Add to queue"], #main [aria-label="View playback queue"], #main .setting-row[aria-label^="Playback queue"]';
+  function queueOn() {
+    return read(QUEUE_KEY, "off") === "on";
+  }
+  function applyQueue() {
+    document.body.classList.toggle("fork-no-queue", !queueOn());
+    var player = document.getElementById("queue");
+    if (player) player.hidden = !queueOn();
+    if (queueOn()) return;
+    // Buttons of the "More options" menu carry no label, only their (translated) text.
+    var texts = ["Add to queue", "View playback queue", "Zur Warteschlange hinzufügen", "Warteschlange anzeigen"];
+    var found = Array.prototype.slice.call(document.querySelectorAll(QUEUE_SELECTOR)).concat(
+      Array.prototype.filter.call(document.querySelectorAll("#main button:not([aria-label])"), function (b) {
+        return texts.indexOf(b.textContent.trim()) >= 0;
+      }),
+    );
+    found.forEach(function (b) {
+      if (b.id === "fork-queue-row") return;
+      if (document.activeElement === b) {
+        var other = b.previousElementSibling || b.nextElementSibling;
+        if (other) other.focus();
+      }
+      b.remove();
+    });
+  }
+  function mountQueue() {
+    var main = document.getElementById("main");
+    if (!main || !main.classList.contains("settings-page") || document.getElementById("fork-queue-row")) return;
+    var anchor = document.getElementById("fork-rewind-row");
+    if (!anchor) return;
+    var row = el("button", "setting-row");
+    row.id = "fork-queue-row";
+    row.setAttribute("data-no-i18n", "");
+    var copy = el("span", "setting-copy", null, row);
+    el("span", "setting-title", t("Playback queue", "Warteschlange"), copy);
+    el(
+      "span",
+      "setting-description",
+      t(
+        "Your own list of videos to play one after another. When off, its buttons are hidden. Episodes still play on automatically.",
+        "Eigene Liste von Videos, die nacheinander laufen. Aus blendet ihre Knöpfe aus. Folgen laufen trotzdem automatisch weiter.",
+      ),
+      copy,
+    );
+    var value = el("span", "setting-value", null, row);
+    function render() {
+      value.textContent = queueOn() ? t("On", "Ein") : t("Off", "Aus");
+      row.setAttribute("aria-label", t("Playback queue", "Warteschlange") + ": " + value.textContent);
+    }
+    row.onclick = function () {
+      write(QUEUE_KEY, queueOn() ? "off" : "on");
+      render();
+      // The app's own queue row comes back only with a fresh settings page.
+      applyQueue();
+    };
+    render();
+    anchor.parentNode.insertBefore(row, anchor.nextSibling);
+  }
+
   // ---- list view for libraries --------------------------------------------------------
   // One title per row as in Plex: poster, title, "2008 · 1h 55min" and two lines of description.
   // Card height in the list (CSS .fork-list-view) plus the grid's row gap.
@@ -139,7 +203,10 @@
   if (main)
     new MutationObserver(function () {
       mountRewind();
+      mountQueue();
+      applyQueue();
       mountViewToggle();
       applyView();
     }).observe(main, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+  applyQueue();
 })();
