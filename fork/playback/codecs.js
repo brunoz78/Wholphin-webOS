@@ -57,7 +57,11 @@
       if (/eac3/.test(p.AudioCodec || "")) p.AudioCodec = "eac3,ac3,aac";
     });
     (result.CodecProfiles || []).forEach(function (p) {
+      // webOS plays AAC 5.1 itself (as Plex does); the original allows only stereo AAC and
+      // has the server convert 5.1 AAC to AC-3.
+      var aac = p.Type === "VideoAudio" && /(^|,)aac(,|$)/.test(p.Codec || "");
       (p.Conditions || []).forEach(function (c) {
+        if (aac && c.Property === "AudioChannels" && Number(c.Value) < 6) c.Value = "6";
         if (c.Property === "VideoBitrate") c.Value = String(MAX_BITRATE);
       });
     });
