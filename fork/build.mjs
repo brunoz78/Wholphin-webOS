@@ -252,8 +252,12 @@ await patch(
 await patch(
   "app.js",
   "  async function seasonsPage(seriesId) {",
-  "  async function forkCollection(item) {\n" +
-    "    var r = reset(item.Name);\n" +
+  // Collection names without "Filmreihe"/"Collection": "Alien" instead of "Alien Filmreihe".
+  "  function forkShortName(name) {\n" +
+    "    return String(name || \"\").replace(/[\\s-]+(Filmreihe|Collection)(?=$|:)/i, \"\") || name;\n" +
+    "  }\n" +
+    "  async function forkCollection(item) {\n" +
+    "    var r = reset(forkShortName(item.Name));\n" +
     "    var data = await Promise.all([\n" +
     "      api(\"/Users/\" + session.user + \"/Items/\" + item.Id),\n" +
     "      api(\"/Users/\" + session.user + \"/Items\", {\n" +
@@ -608,6 +612,14 @@ await patch(
     "        ? (item.ChildCount ? (window.wholphinI18n ? window.wholphinI18n.t : String)(item.ChildCount + (item.ChildCount === 1 ? \" movie\" : \" movies\")) : \"\")\n" +
     "        : item.ProductionYear;",
   "Collections: number of movies instead of a year",
+);
+
+// Collection cards drop the word "Filmreihe" (see forkShortName).
+await patch(
+  "app.js",
+  '      el("span", item.SeriesName || item.Name, b).className = "card-title";',
+  '      el("span", item.SeriesName || (item.Type === "BoxSet" ? forkShortName(item.Name) : item.Name), b).className = "card-title";',
+  "Collection cards without Filmreihe",
 );
 
 // Rewind on resume (fork/extras.js): resuming starts a few seconds before the saved position.
