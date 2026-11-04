@@ -326,8 +326,36 @@ await patch(
     "              event.stopPropagation();\n" +
     "              target.onclick();\n" +
     "            });\n" +
-    "          })(figure, person);",
+    "          })(figure, person);\n" +
+    // Marks the person so "Back" from the person page returns to this very figure.
+    "          figure.dataset.item = \"cast:\" + (person.Id || person.Name);",
   "Cast opens the person",
+);
+// Back from a person page: the figure of that person gets the focus again. The page's own
+// focus (Play, first season) comes later after loading, so it is set again a few times until
+// the remote is used.
+await patch(
+  "app.js",
+  "      row.loadMoreCast();",
+  "      row.loadMoreCast();\n" +
+    "      (function (frame) {\n" +
+    "        var key = frame && frame.focus;\n" +
+    "        if (!key || key.indexOf(\"cast:\") !== 0) return;\n" +
+    "        function find() { return Array.prototype.find.call(row.children, function (f) { return f.dataset.item === key; }); }\n" +
+    "        while (!find() && renderedCast < people.length) row.loadMoreCast();\n" +
+    "        var target = find(), moved = false;\n" +
+    "        if (!target) return;\n" +
+    "        function stop() { moved = true; window.removeEventListener(\"keydown\", stop, true); }\n" +
+    "        window.addEventListener(\"keydown\", stop, true);\n" +
+    "        [0, 300, 800, 1500, 2500].forEach(function (ms) {\n" +
+    "          setTimeout(function () {\n" +
+    "            if (moved || !target.isConnected || document.activeElement === target) return;\n" +
+    "            focusContent(target);\n" +
+    "          }, ms);\n" +
+    "        });\n" +
+    "        setTimeout(stop, 3000);\n" +
+    "      })(stack[stack.length - 1]);",
+  "Back from a person focuses that person",
 );
 await patch(
   "app.js",
