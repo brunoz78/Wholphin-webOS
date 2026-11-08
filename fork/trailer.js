@@ -97,9 +97,9 @@
 
   // ---- button -----------------------------------------------------------------------------
   // Adds the button to `row` once Plex has a trailer; `after` is the button it follows.
-  function mount(row, credit, after) {
+  function mount(row, credit, after, season) {
     if (!row || !window.WholphinPlex || !window.WholphinPlex.signedIn() || !credit.id) return;
-    window.WholphinPlex.trailers(credit).then(function (list) {
+    window.WholphinPlex.trailers(credit, season).then(function (list) {
       if (!list.length || !row.isConnected || row.querySelector(".fork-trailer")) return;
       var b = document.createElement("button");
       b.className = "fork-trailer";
@@ -121,6 +121,16 @@
         row,
         { media_type: item.Type === "Series" ? "tv" : "movie", id: item.ProviderIds && item.ProviderIds.Tmdb, title: item.Name, name: item.Name },
         after,
+      );
+    },
+    // Season of a series (season view): only a trailer of this very season, else no button.
+    season: function (row, series, number, after) {
+      if (!series || number == null) return;
+      mount(
+        row,
+        { media_type: "tv", id: series.ProviderIds && series.ProviderIds.Tmdb, title: series.Name, name: series.Name },
+        after,
+        number,
       );
     },
     // Title from TMDB (filmography page).

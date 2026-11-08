@@ -226,17 +226,31 @@
   // Trailers of a title from Plex (fork/trailer.js), in the language of the app first:
   // [{ title, url, height }] best first; empty without Plex account or trailer.
   var RES = { "4k": 2160, 1080: 1080, 720: 720, 480: 480, sd: 360 };
-  function trailers(credit) {
+  function metadata(path) {
+    var h = headers();
+    h["X-Plex-Language"] = de ? "de" : "en";
+    return fetch(METADATA + "/library/metadata/" + path, { headers: h, credentials: "omit" }).then(function (r) {
+      if (r.status === 401) checkAccount();
+      if (!r.ok) throw new Error("Plex " + r.status);
+      return r.json();
+    });
+  }
+  // With `season` (its number) only the trailers of that season of the series.
+  function trailers(credit, season) {
     if (!signedIn()) return Promise.resolve([]);
     return match(credit)
       .then(function (ratingKey) {
-        var h = headers();
-        h["X-Plex-Language"] = de ? "de" : "en";
-        return fetch(METADATA + "/library/metadata/" + encodeURIComponent(ratingKey) + "/extras", { headers: h, credentials: "omit" }).then(function (r) {
-          if (r.status === 401) checkAccount();
-          if (!r.ok) throw new Error("Plex " + r.status);
-          return r.json();
+        if (season == null) return ratingKey;
+        return metadata(encodeURIComponent(ratingKey) + "/children").then(function (data) {
+          var found = ((data.MediaContainer || {}).Metadata || []).find(function (s) {
+            return Number(s.index) === Number(season);
+          });
+          if (!found) throw new Error("no season");
+          return found.ratingKey;
         });
+      })
+      .then(function (ratingKey) {
+        return metadata(encodeURIComponent(ratingKey) + "/extras");
       })
       .then(function (data) {
         var token = load().token,

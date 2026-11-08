@@ -581,6 +581,14 @@ await patch(
   '    if (context.seasons.length > 1) button("All seasons", function () {',
   '    subtitleMount.className = "fork-subtitle-action";\n' +
     "    actions.appendChild(subtitleMount);\n" +
+    // Trailer of this season from Plex, if there is one (fork/trailer.js).
+    "    if (window.WholphinTrailer) {\n" +
+    "      var forkSeason = context.seasons.find(function (s) { return s.Id === id; });\n" +
+    "      if (forkSeason && forkSeason.IndexNumber != null)\n" +
+    "        request(\"/Users/\" + session.user + \"/Items/\" + context.seriesId).then(function (series) {\n" +
+    "          if (valid()) window.WholphinTrailer.season(actions, series, forkSeason.IndexNumber, favorite);\n" +
+    "        }, function () {});\n" +
+    "    }\n" +
     '    if (false) button("All seasons", function () {',
   "Season view: no All seasons button",
 );

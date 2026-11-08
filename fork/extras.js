@@ -152,6 +152,38 @@
     anchor.parentNode.insertBefore(row, anchor.nextSibling);
   }
 
+  // ---- keep the focus on a button while it is busy ----------------------------------------
+  // "Mark as watched", the heart and others are switched off while the server answers; the TV
+  // then drops the focus and the next arrow key starts again at the first button. The focus goes
+  // back to the button as soon as it works again.
+  var lastPressed = null;
+  document.addEventListener(
+    "click",
+    function (event) {
+      var b = event.target && event.target.closest && event.target.closest("button");
+      if (b) lastPressed = b;
+    },
+    true,
+  );
+  function focusLost() {
+    var a = document.activeElement;
+    return !a || a === document.body || a === document.getElementById("main");
+  }
+  var busyRoot = document.getElementById("main");
+  if (busyRoot)
+    new MutationObserver(function (records) {
+      records.forEach(function (r) {
+        var b = r.target;
+        if (b !== lastPressed || !b.isConnected) return;
+        if (b.disabled) {
+          b.forkWasFocused = document.activeElement === b || focusLost();
+        } else if (b.forkWasFocused && focusLost()) {
+          b.forkWasFocused = false;
+          b.focus();
+        }
+      });
+    }).observe(busyRoot, { attributes: true, attributeFilter: ["disabled"], subtree: true });
+
   // ---- list view for libraries --------------------------------------------------------
   // One title per row as in Plex: poster, title, "2008 · 1h 55min" and two lines of description.
   // Card height in the list (CSS .fork-list-view) plus the grid's row gap.
