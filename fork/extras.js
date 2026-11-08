@@ -104,6 +104,19 @@
       }
       b.remove();
     });
+    // A "More options" menu left with only "Close" goes away together with its ⋮ button.
+    Array.prototype.forEach.call(document.querySelectorAll("#main .detail-more-options"), function (menu) {
+      if (menu.querySelectorAll("button").length > 1) return;
+      var more = document.querySelector('#main .actions [aria-label="More options"]');
+      if (more) {
+        if (document.activeElement === more) {
+          var other = more.previousElementSibling || more.nextElementSibling;
+          if (other) other.focus();
+        }
+        more.remove();
+      }
+      menu.remove();
+    });
   }
   function mountQueue() {
     var main = document.getElementById("main");
