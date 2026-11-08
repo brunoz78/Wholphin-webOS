@@ -169,4 +169,17 @@
     anchor.parentNode.insertBefore(row, anchor.nextSibling);
   }
   if (main) new MutationObserver(mountSetting).observe(main, { childList: true, subtree: true });
+
+  // A trailer (fork/trailer.js) pauses the theme music and lets it go on afterwards.
+  var pausedForTrailer = false;
+  window.WholphinTheme.pause = function () {
+    pausedForTrailer = !audio.paused;
+    if (pausedForTrailer) audio.pause();
+  };
+  window.WholphinTheme.resume = function () {
+    if (!pausedForTrailer) return;
+    pausedForTrailer = false;
+    var p = audio.play();
+    if (p && p.catch) p.catch(function () {});
+  };
 })();

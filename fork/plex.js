@@ -223,7 +223,57 @@
     return !!load().token;
   }
 
+  // Trailers of a title from Plex (fork/trailer.js), in the language of the app first:
+  // [{ title, url, height }] best first; empty without Plex account or trailer.
+  var RES = { "4k": 2160, 1080: 1080, 720: 720, 480: 480, sd: 360 };
+  function trailers(credit) {
+    if (!signedIn()) return Promise.resolve([]);
+    return match(credit)
+      .then(function (ratingKey) {
+        var h = headers();
+        h["X-Plex-Language"] = de ? "de" : "en";
+        return fetch(METADATA + "/library/metadata/" + encodeURIComponent(ratingKey) + "/extras", { headers: h, credentials: "omit" }).then(function (r) {
+          if (r.status === 401) checkAccount();
+          if (!r.ok) throw new Error("Plex " + r.status);
+          return r.json();
+        });
+      })
+      .then(function (data) {
+        var token = load().token,
+          german = /german|deutsch/i;
+        return ((data.MediaContainer || {}).Metadata || [])
+          .filter(function (e) {
+            return e.subtype === "trailer" && e.Media && e.Media.length;
+          })
+          .map(function (e, index) {
+            // The best quality the TV plays smoothly: up to 1080p.
+            var media = e.Media.slice()
+              .filter(function (m) {
+                return m.Part && m.Part[0] && m.Part[0].key && (RES[m.videoResolution] || 360) <= 1080;
+              })
+              .sort(function (a, b) {
+                return (RES[b.videoResolution] || 360) - (RES[a.videoResolution] || 360);
+              })[0];
+            return media && {
+              title: e.title,
+              height: RES[media.videoResolution] || 360,
+              url: METADATA + media.Part[0].key + "?X-Plex-Token=" + encodeURIComponent(token) +
+                "&X-Plex-Client-Identifier=" + encodeURIComponent(clientId()),
+              rank: (de && !german.test(e.title || "") ? 100 : 0) + index,
+            };
+          })
+          .filter(Boolean)
+          .sort(function (a, b) {
+            return a.rank - b.rank;
+          });
+      })
+      .catch(function () {
+        return [];
+      });
+  }
+
   window.WholphinPlex = {
+    trailers: trailers,
     signedIn: signedIn,
     signIn: signIn,
     match: match,

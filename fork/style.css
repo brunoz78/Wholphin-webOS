@@ -414,3 +414,14 @@
 #fork-stats .fork-stats-warn {
   color: #ffcf70;
 }
+
+/* Trailer player (fork/trailer.js): the whole screen, title and progress fade out while playing. */
+#fork-trailer-player { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 10000; background: #000; }
+#fork-trailer-player video { width: 100%; height: 100%; display: block; background: #000; }
+#fork-trailer-player .fork-trailer-bar { position: absolute; left: 0; right: 0; top: 0; padding: 40px 64px 80px; background: linear-gradient(rgba(0, 0, 0, 0.75), rgba(0, 0, 0, 0)); transition: opacity 0.4s; }
+#fork-trailer-player .fork-trailer-title { margin: 0; color: #fff; font-size: 34px; font-weight: 600; }
+#fork-trailer-player .fork-trailer-hint { margin: 10px 0 0; color: #c9c3d3; font-size: 22px; }
+#fork-trailer-player .fork-trailer-progress { position: absolute; left: 64px; right: 64px; bottom: 48px; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.25); transition: opacity 0.4s; }
+#fork-trailer-player .fork-trailer-progress div { height: 100%; width: 0; border-radius: 3px; background: #fff; }
+#fork-trailer-player.fork-trailer-quiet .fork-trailer-bar,
+#fork-trailer-player.fork-trailer-quiet .fork-trailer-progress { opacity: 0; }

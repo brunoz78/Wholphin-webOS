@@ -240,10 +240,6 @@
 
   // Shared with fork/plex.js: library index, TMDB posters and the information page.
   window.WholphinLibraryIndex = libraryIndex;
-  // TMDB requests with the key of the settings (fork/trailer.js).
-  window.WholphinTmdb = function (path) {
-    return tmdbKey() ? tmdb(path) : Promise.reject(new Error("no TMDB key"));
-  };
   window.WholphinTmdbPoster = function (credit) {
     if (!tmdbKey()) return Promise.resolve(null);
     return tmdb("/" + credit.media_type + "/" + encodeURIComponent(credit.id)).then(
