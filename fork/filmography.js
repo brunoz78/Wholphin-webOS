@@ -230,6 +230,7 @@
         // Watchlist and watched in Plex (fork/plex.js); without it a plain note.
         var row = el("div", "actions", null, box);
         if (window.WholphinPlexActions) window.WholphinPlexActions(row, credit, true);
+        if (window.WholphinTrailer) window.WholphinTrailer.tmdb(row, credit);
       },
       function () {
         if (valid()) status.textContent = t("TMDB could not be reached.", "TMDB ist nicht erreichbar.");
@@ -239,6 +240,10 @@
 
   // Shared with fork/plex.js: library index, TMDB posters and the information page.
   window.WholphinLibraryIndex = libraryIndex;
+  // TMDB requests with the key of the settings (fork/trailer.js).
+  window.WholphinTmdb = function (path) {
+    return tmdbKey() ? tmdb(path) : Promise.reject(new Error("no TMDB key"));
+  };
   window.WholphinTmdbPoster = function (credit) {
     if (!tmdbKey()) return Promise.resolve(null);
     return tmdb("/" + credit.media_type + "/" + encodeURIComponent(credit.id)).then(

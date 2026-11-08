@@ -51,6 +51,7 @@ await fs.copyFile(path.join(fork, "overview.js"), path.join(out, "overview.js"))
 await fs.copyFile(path.join(fork, "filmography.js"), path.join(out, "filmography.js"));
 await fs.copyFile(path.join(fork, "plex.js"), path.join(out, "plex.js"));
 await fs.copyFile(path.join(fork, "continue.js"), path.join(out, "continue.js"));
+await fs.copyFile(path.join(fork, "trailer.js"), path.join(out, "trailer.js"));
 await fs.copyFile(path.join(fork, "playback/theme.js"), path.join(out, "theme.js"));
 await fs.copyFile(path.join(fork, "style.css"), path.join(out, "fork.css"));
 
@@ -65,7 +66,7 @@ html = html
   .replace(
     appHook,
     '<script src="pgs.js"></script>\n    <script src="codecs.js"></script>\n    <script src="login.js"></script>\n    ' + appHook +
-      '\n    <script src="stats.js"></script>\n    <script src="dialog.js"></script>\n    <script src="nav.js"></script>\n    <script src="extras.js"></script>\n    <script src="exit.js"></script>\n    <script src="overview.js"></script>\n    <script src="filmography.js"></script>\n    <script src="plex.js"></script>\n    <script src="continue.js"></script>',
+      '\n    <script src="stats.js"></script>\n    <script src="dialog.js"></script>\n    <script src="nav.js"></script>\n    <script src="extras.js"></script>\n    <script src="exit.js"></script>\n    <script src="overview.js"></script>\n    <script src="filmography.js"></script>\n    <script src="plex.js"></script>\n    <script src="continue.js"></script>\n    <script src="trailer.js"></script>',
   )
   // Theme music must exist before the app opens its first page.
   .replace(
@@ -385,6 +386,14 @@ await patch(
   "      var both = await Promise.all([resume(), next()]);",
   "      var both = (await Promise.all([resume(), next()])).map(forkContinue);",
   "Continue watching: combined filter",
+);
+// Movie and series page: "Trailer" opens the trailer in the TV's YouTube app (fork/trailer.js).
+await patch(
+  "app.js",
+  "    function updateFavorite() {",
+  "    if (window.WholphinTrailer) window.WholphinTrailer.item(actions, item, favorite);\n" +
+    "    function updateFavorite() {",
+  "Trailer button",
 );
 await patch(
   "app.js",
