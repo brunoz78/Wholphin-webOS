@@ -428,7 +428,7 @@
 
 /* Season view: the chosen episode keeps a frame while the focus is on the buttons; the watched
    tick sits next to the episode number (fork/build.mjs). */
-.episode-browser-rail .card.fork-current:not(:focus) { box-shadow: 0 0 0 4px #ffc940; }
+.episode-browser-rail .card.fork-current:not(:focus) { box-shadow: 0 0 0 7px #ffc940; }
 .art .fork-corner { position: absolute; top: 10px; right: 10px; display: flex; align-items: center; }
 .art .fork-corner .watched-badge,
 .art .fork-corner .episode-badge { position: static; top: auto; left: auto; right: auto; }
