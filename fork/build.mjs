@@ -52,6 +52,7 @@ await fs.copyFile(path.join(fork, "filmography.js"), path.join(out, "filmography
 await fs.copyFile(path.join(fork, "plex.js"), path.join(out, "plex.js"));
 await fs.copyFile(path.join(fork, "continue.js"), path.join(out, "continue.js"));
 await fs.copyFile(path.join(fork, "trailer.js"), path.join(out, "trailer.js"));
+await fs.copyFile(path.join(fork, "navicons.js"), path.join(out, "navicons.js"));
 await fs.copyFile(path.join(fork, "playback/theme.js"), path.join(out, "theme.js"));
 await fs.copyFile(path.join(fork, "style.css"), path.join(out, "fork.css"));
 
@@ -65,7 +66,7 @@ html = html
   // PGS subtitles and AV1 hook into WholphinCore, so they load after core.js and before app.js.
   .replace(
     appHook,
-    '<script src="pgs.js"></script>\n    <script src="codecs.js"></script>\n    <script src="login.js"></script>\n    ' + appHook +
+    '<script src="pgs.js"></script>\n    <script src="codecs.js"></script>\n    <script src="login.js"></script>\n    <script src="navicons.js"></script>\n    ' + appHook +
       '\n    <script src="stats.js"></script>\n    <script src="dialog.js"></script>\n    <script src="nav.js"></script>\n    <script src="extras.js"></script>\n    <script src="exit.js"></script>\n    <script src="overview.js"></script>\n    <script src="filmography.js"></script>\n    <script src="plex.js"></script>\n    <script src="continue.js"></script>\n    <script src="trailer.js"></script>',
   )
   // Theme music must exist before the app opens its first page.
@@ -591,6 +592,22 @@ await patch(
     "    }\n" +
     '    if (false) button("All seasons", function () {',
   "Season view: no All seasons button",
+);
+// Side navigation: filled icons as in Wholphin for Android TV (fork/navicons.js); collections,
+// playlists and music libraries get icons of their own instead of the folder.
+await patch(
+  "app.js",
+  "      b.appendChild(navIcon(icon));",
+  "      b.appendChild(window.WholphinNavIcon ? window.WholphinNavIcon(icon, key) : navIcon(icon));",
+  "Navigation: filled icons",
+);
+await patch(
+  "app.js",
+  '        item.CollectionType === "movies" ? "movies" : item.CollectionType === "tvshows" ? "tv" : "folder",',
+  '        item.CollectionType === "movies" ? "movies" : item.CollectionType === "tvshows" ? "tv" :\n' +
+    '          item.CollectionType === "boxsets" ? "collections" : item.CollectionType === "playlists" ? "playlists" :\n' +
+    '          item.CollectionType === "music" ? "music" : "folder",',
+  "Navigation: icons for collections, playlists and music",
 );
 // Season view as in Wholphin for Android TV: the chosen episode keeps a frame while the focus is
 // on the buttons, and choosing an episode plays it at once (resuming where it stopped).

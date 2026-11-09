@@ -433,3 +433,13 @@
 .art .fork-corner .watched-badge,
 .art .fork-corner .episode-badge { position: static; top: auto; left: auto; right: auto; }
 .art .fork-corner .watched-badge { margin-right: 6px; }
+
+/* Side navigation: filled icons as in Wholphin for Android TV (fork/navicons.js). */
+nav button svg.fork-filled { fill: currentColor; stroke: none; width: 32px; height: 32px; }
+
+/* Description: three lines and a slightly smaller font on movie, series and season pages,
+   as in Wholphin for Android TV. */
+.episode-browser-overview,
+.series-detail > .overview,
+.movie-detail .overview { font-size: 23px; line-height: 1.4; -webkit-line-clamp: 3; }
+.episode-browser-overview { min-height: 97px; }
