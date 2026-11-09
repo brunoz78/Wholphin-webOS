@@ -592,6 +592,45 @@ await patch(
     '    if (false) button("All seasons", function () {',
   "Season view: no All seasons button",
 );
+// Season view as in Wholphin for Android TV: the chosen episode keeps a frame while the focus is
+// on the buttons, and choosing an episode plays it at once (resuming where it stopped).
+await patch(
+  "app.js",
+  "      selected = item;",
+  "      selected = item;\n" +
+    "      Array.prototype.forEach.call(grid.children, function (card) {\n" +
+    '        card.classList.toggle("fork-current", card.dataset.item === item.Id);\n' +
+    "      });",
+  "Season view: frame on the chosen episode",
+);
+await patch(
+  "app.js",
+  "    function activateEpisode(item) {",
+  "    function activateEpisode(item) {\n" +
+    "      if (item) {\n" +
+    "        select(item);\n" +
+    "        var forkFrame = stack[stack.length - 1];\n" +
+    "        if (forkFrame) forkFrame.focus = item.Id;\n" +
+    "        return play(item, (item.UserData && item.UserData.PlaybackPositionTicks) || 0, true, false,\n" +
+    "          episodeSubtitles ? episodeSubtitles.options() : {});\n" +
+    "      }",
+  "Season view: choosing an episode plays it",
+);
+// Watched tick top right, right next to the episode number, instead of top left.
+await patch(
+  "app.js",
+  "    // Watched history and an in-progress rewatch can both be present.",
+  '    var forkNumber = art.querySelector(".episode-badge"),\n' +
+    '      forkTick = art.querySelector(".watched-badge");\n' +
+    "    if (forkNumber) {\n" +
+    '      var forkCorner = art.querySelector(".fork-corner") || el("span", null, art);\n' +
+    '      forkCorner.className = "fork-corner";\n' +
+    "      if (forkTick) forkCorner.appendChild(forkTick);\n" +
+    "      forkCorner.appendChild(forkNumber);\n" +
+    "    }\n" +
+    "    // Watched history and an in-progress rewatch can both be present.",
+  "Watched tick next to the episode number",
+);
 await patch(
   "app.js",
   "        if (actions.contains(active) && key === 38) {",

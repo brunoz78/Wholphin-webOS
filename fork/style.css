@@ -425,3 +425,11 @@
 #fork-trailer-player .fork-trailer-progress div { height: 100%; width: 0; border-radius: 3px; background: #fff; }
 #fork-trailer-player.fork-trailer-quiet .fork-trailer-bar,
 #fork-trailer-player.fork-trailer-quiet .fork-trailer-progress { opacity: 0; }
+
+/* Season view: the chosen episode keeps a frame while the focus is on the buttons; the watched
+   tick sits next to the episode number (fork/build.mjs). */
+.episode-browser-rail .card.fork-current:not(:focus) { box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.85); }
+.art .fork-corner { position: absolute; top: 10px; right: 10px; display: flex; align-items: center; }
+.art .fork-corner .watched-badge,
+.art .fork-corner .episode-badge { position: static; top: auto; left: auto; right: auto; }
+.art .fork-corner .watched-badge { margin-right: 6px; }
