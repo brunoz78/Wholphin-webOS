@@ -49,6 +49,53 @@ for (const f of ["appinfo.json", "wholphin-icon.png", "wholphin-large-icon.png",
 const platformFiles = ["platform.js", "playback.js", "firetv.css"];
 for (const f of platformFiles) await fs.copyFile(path.join(root, "platforms/firetv", f), path.join(out, f));
 
+// A video the Fire TV cannot decode (e.g. AV1 on the Fire TV Stick 4K) made the original fall back
+// to its compatibility profile: H.264 and stereo AAC. The fork keeps the device profile instead:
+// the server converts only the video (HEVC when the server allows it, else H.264, at most
+// 1080p since a server without hardware encoding cannot do 4K in time), and audio the Fire TV
+// can play (E-AC-3 5.1, …) stays as it is.
+{
+  const p = path.join(out, "playback.js");
+  let code = (await fs.readFile(p, "utf8")).replace(/\r\n/g, "\n");
+  const steps = [
+    [
+      '    if (!support || !(caps.audio || []).length) return { native: false, reason: "No matching device decoder capability" };',
+      '    if (!(caps.audio || []).length) return { native: false, reason: "No matching device decoder capability" };\n' +
+        "    if (!support) {\n" +
+        '      if (!(caps.videos || []).some(function (v) { return v.codec === "hevc" || v.codec === "h264"; }))\n' +
+        '        return { native: false, reason: "No matching device decoder capability" };\n' +
+        "      if (!nativeSubtitle(source, index == null ? -1 : index))\n" +
+        '        return { native: false, reason: "Selected subtitles require server conversion" };\n' +
+        '      return { native: true, reason: "Server converts the video for the Fire TV decoder, audio stays" };\n' +
+        "    }",
+    ],
+    [
+      '      if (v.codec === "h264") {',
+      '      if (unsupported && (v.codec === "h264" || v.codec === "hevc")) conditions.push(condition("Width", 1920), condition("Height", 1080));\n' +
+        '      if (v.codec === "h264") {',
+    ],
+    [
+      "    fallback.CodecProfiles = videos.map(function (v) {",
+      "    var sourceVideo = source && (source.MediaStreams || []).find(function (s) { return s.Type === \"Video\"; }),\n" +
+        "      unsupported = !!sourceVideo && !videos.some(function (v) { return v.codec === String(sourceVideo.Codec).toLowerCase(); });\n" +
+        "    fallback.CodecProfiles = videos.map(function (v) {",
+    ],
+    [
+      'VideoCodec: remux.join(","),',
+      'VideoCodec: remux.slice().sort(function (a, b) { return (b === "hevc") - (a === "hevc"); }).join(","),',
+    ],
+    [
+      'AudioCodec: audio.filter(function (a) { return ["aac", "ac3", "eac3"].indexOf(a) >= 0; }).join(",") || "aac",',
+      'AudioCodec: ["eac3", "ac3", "aac"].filter(function (a) { return audio.indexOf(a) >= 0; }).join(",") || "aac",',
+    ],
+  ];
+  for (const [from, to] of steps) {
+    if (!code.includes(from)) throw new Error(`playback.js changed: ${from} not found`);
+    code = code.replace(from, to);
+  }
+  await fs.writeFile(p, code);
+}
+
 let html = await fs.readFile(path.join(out, "index.html"), "utf8");
 for (const tag of ['<script src="pgs.js"></script>', '<script src="codecs.js"></script>']) {
   if (!html.includes(tag)) throw new Error(`index.html: ${tag} not found`);
