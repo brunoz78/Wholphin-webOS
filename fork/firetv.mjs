@@ -51,9 +51,8 @@ for (const f of platformFiles) await fs.copyFile(path.join(root, "platforms/fire
 
 // A video the Fire TV cannot decode (e.g. AV1 on the Fire TV Stick 4K) made the original fall back
 // to its compatibility profile: H.264 and stereo AAC. The fork keeps the device profile instead:
-// the server converts only the video (HEVC when the server allows it, else H.264, at most
-// 1080p since a server without hardware encoding cannot do 4K in time), and audio the Fire TV
-// can play (E-AC-3 5.1, …) stays as it is.
+// the server converts only the video (HEVC with HDR when the server allows HEVC encoding, else
+// H.264), and audio the Fire TV can play (E-AC-3 5.1, …) stays as it is.
 {
   const p = path.join(out, "playback.js");
   let code = (await fs.readFile(p, "utf8")).replace(/\r\n/g, "\n");
@@ -68,17 +67,6 @@ for (const f of platformFiles) await fs.copyFile(path.join(root, "platforms/fire
         '        return { native: false, reason: "Selected subtitles require server conversion" };\n' +
         '      return { native: true, reason: "Server converts the video for the Fire TV decoder, audio stays" };\n' +
         "    }",
-    ],
-    [
-      '      if (v.codec === "h264") {',
-      '      if (unsupported && (v.codec === "h264" || v.codec === "hevc")) conditions.push(condition("Width", 1920), condition("Height", 1080));\n' +
-        '      if (v.codec === "h264") {',
-    ],
-    [
-      "    fallback.CodecProfiles = videos.map(function (v) {",
-      "    var sourceVideo = source && (source.MediaStreams || []).find(function (s) { return s.Type === \"Video\"; }),\n" +
-        "      unsupported = !!sourceVideo && !videos.some(function (v) { return v.codec === String(sourceVideo.Codec).toLowerCase(); });\n" +
-        "    fallback.CodecProfiles = videos.map(function (v) {",
     ],
     [
       'VideoCodec: remux.join(","),',
