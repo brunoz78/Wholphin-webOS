@@ -9,7 +9,8 @@
   }
   var open = false;
 
-  window.WholphinExit = function () {
+  // `leave` closes the app on platforms with their own exit (Fire TV); webOS closes the window.
+  window.WholphinExit = function (leave) {
     if (open || !window.WholphinDialog) return;
     open = true;
     window.WholphinDialog({
@@ -18,7 +19,8 @@
         {
           label: t("Exit", "Beenden"),
           action: function () {
-            window.close();
+            if (leave) leave();
+            else window.close();
           },
         },
         { label: t("Cancel", "Abbrechen") },

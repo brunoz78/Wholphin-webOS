@@ -485,6 +485,14 @@ await patch(
     '      else if (window.confirm("Exit Ember?")) window.close();',
   "Exit dialog",
 );
+// Fire TV has its own exit (fork/firetv.mjs); the WebView shows no window.confirm either.
+await patch(
+  "app.js",
+  '      if (window.confirm("Exit Ember?")) P.exit();',
+  "      if (window.WholphinExit) window.WholphinExit(P.exit);\n" +
+    '      else if (window.confirm("Exit Ember?")) P.exit();',
+  "Exit dialog with the platform's exit",
+);
 
 // Theme music (fork/playback/theme.js): detail pages and the season view report their item.
 await patch(

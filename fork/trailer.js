@@ -76,7 +76,7 @@
       event.stopPropagation();
       show();
       if (k === 461 || k === 8 || k === 27 || k === 413) return close(); // Back, Stop
-      if (k === 13 || k === 32 || k === 415 || k === 19) {
+      if (k === 13 || k === 32 || k === 415 || k === 19 || k === 179) {
         if (k === 415) return video.play();
         if (k === 19) return video.pause();
         return video.paused ? video.play() : video.pause();

@@ -36,6 +36,12 @@ jobs:
         with:
           node-version: 22
 
+      # Fire TV APK: Gradle needs JDK 17; the Android SDK comes with the runner.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
       - name: Git identity
         run: |
           git config user.name "github-actions[bot]"
@@ -113,6 +119,21 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           FORK_RELEASE="$TAG" node fork/build.mjs --package
 
+      - name: Build Fire TV APK
+        env:
+          FORK_RELEASE: ${{ steps.build.outputs.tag }}
+          KEYSTORE_B64: ${{ secrets.WHOLPHIN_KEYSTORE_B64 }}
+          WHOLPHIN_KEYSTORE_PASSWORD: ${{ secrets.WHOLPHIN_KEYSTORE_PASSWORD }}
+        run: |
+          # With the signing key (secrets) every release installs over the previous one;
+          # without it a debug APK is built for testing.
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/wholphin.p12"
+            export WHOLPHIN_KEYSTORE="$RUNNER_TEMP/wholphin.p12"
+          fi
+          node fork/firetv.mjs --package
+          rm -f "$RUNNER_TEMP/wholphin.p12"
+
       - name: Push
         env:
           GH_TOKEN: ${{ github.token }}
@@ -147,7 +168,8 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           TAG="${{ steps.build.outputs.tag }}"
           IPK=$(ls dist/*.ipk)
-          (cd dist && sha256sum "$(basename "$IPK")" > "$(basename "$IPK").sha256")
+          APK=$(ls dist/wholphin-firetv-*.apk)
+          (cd dist && sha256sum "$(basename "$IPK")" > "$(basename "$IPK").sha256" && sha256sum "$(basename "$APK")" > "$(basename "$APK").sha256")
           # Only the newest release of each version is kept. The notes therefore cover everything
           # since the release of the previous version, and older releases of this version go away.
           PREV=$(git tag --list 'v*.post*' --sort=-creatordate | grep -v "^v${VERSION}\.post" | head -1)
@@ -160,9 +182,11 @@ jobs:
           fi
           FORK=$(git log --no-merges --format='- %s' HEAD $SINCE ^upstream/main -- fork .github README.md | head -40)
           {
-            echo "Wholphin für LG webOS mit deutscher Oberfläche, Version $VERSION (Grundlage JoeKer1/Wholphin-webOS)."
+            echo "Wholphin für LG webOS und Fire TV mit deutscher Oberfläche, Version $VERSION (Grundlage JoeKer1/Wholphin-webOS)."
             echo
             echo "**Installieren/aktualisieren:** \`.ipk\` herunterladen und mit dem webOS Dev Manager oder \`ares-install --device <tv> $(basename "$IPK")\` auf den Fernseher laden. Anmeldung und Einstellungen bleiben erhalten."
+            echo
+            echo "**Fire TV (Fire OS 6 und neuer):** \`$(basename "$APK")\` mit \`adb install -r\` oder der Downloader-App installieren. Spätere Versionen findet die App selbst unter Einstellungen → Updates."
             if [ -n "$ORIGINAL" ]; then
               echo
               echo "### Neu im Original"
@@ -176,7 +200,7 @@ jobs:
           } > notes.md
           git tag "$TAG"
           git push origin "$TAG"
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" dist/*.ipk dist/*.sha256 --title "Wholphin $TAG" --notes-file notes.md
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" dist/*.ipk dist/*.apk dist/*.sha256 --title "Wholphin $TAG" --notes-file notes.md
           for OLD in $(git tag --list "v${VERSION}.post*"); do
             [ "$OLD" = "$TAG" ] && continue
             gh release delete "$OLD" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || git push origin ":refs/tags/$OLD" || true
