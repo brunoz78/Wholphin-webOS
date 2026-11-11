@@ -770,6 +770,16 @@ await patch(
   "Collection cards without Filmreihe",
 );
 
+// Player options: the queue switch (fork/extras.js) hides the "Queue" button; moving the focus
+// must skip hidden buttons, or with no chapters it lands on the hidden one and gets stuck.
+for (const [from, why] of [
+  ['      var first = tools.querySelector("button:not(:disabled)");', "opening"],
+  ['          tools.querySelector("button:not(:disabled)").focus();', "down from the controls"],
+  ['members = Array.prototype.slice.call(group.querySelectorAll("button:not(:disabled)"))', "left/right"],
+  ['var nextMembers = nextGroup.querySelectorAll("button:not(:disabled)");', "up/down"],
+])
+  await patch("app.js", from, from.replace('"button:not(:disabled)"', '"button:not(:disabled):not([hidden])"'), `Player options skip hidden buttons (${why})`);
+
 // Rewind on resume (fork/extras.js): resuming starts a few seconds before the saved position.
 await patch(
   "app.js",
