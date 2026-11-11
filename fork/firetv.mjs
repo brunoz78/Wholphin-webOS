@@ -161,8 +161,9 @@ await edit("app/build.gradle", [
   ],
 ]);
 // The launcher keeps a tile's picture per launcher entry: a new picture needs a new entry name.
-// Fire OS shows sideloaded apps by their icon (square, on a grey tile), not by the banner: the
-// icon is the square dolphin, the banner stays the wide picture.
+// Fire OS 6 shows a sideloaded app's banner squeezed into a square on a grey tile: the banner is
+// therefore square too (dolphin with the name below). The picture is made once at installation;
+// a changed picture shows only after uninstalling and installing again.
 await edit("app/src/main/AndroidManifest.xml", [
   ['android:label="Ember"', 'android:label="Wholphin"', true],
   ['android:icon="@drawable/ember_launcher_tile"', 'android:icon="@drawable/ember_app_icon"', true],
