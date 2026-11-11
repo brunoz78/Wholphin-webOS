@@ -166,7 +166,7 @@ await edit("app/build.gradle", [
 await edit("app/src/main/AndroidManifest.xml", [
   ['android:label="Ember"', 'android:label="Wholphin"', true],
   ['android:icon="@drawable/ember_launcher_tile"', 'android:icon="@drawable/ember_app_icon"', true],
-  ['android:name=".EmberLauncher"', 'android:name=".WholphinLauncher2"'],
+  ['android:name=".EmberLauncher"', 'android:name=".WholphinLauncher3"'],
 ]);
 const art = path.join(project, "app/src/main/res/drawable-nodpi");
 await fs.copyFile(path.join(fork, "assets/firetv/wholphin_banner.png"), path.join(art, "ember_launcher_tile.png"));
