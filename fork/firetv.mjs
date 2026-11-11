@@ -125,7 +125,11 @@ await edit("app/build.gradle", [
       "    }",
   ],
 ]);
-await edit("app/src/main/AndroidManifest.xml", [['android:label="Ember"', 'android:label="Wholphin"', true]]);
+// The launcher keeps a tile's picture per launcher entry: a new picture needs a new entry name.
+await edit("app/src/main/AndroidManifest.xml", [
+  ['android:label="Ember"', 'android:label="Wholphin"', true],
+  ['android:name=".EmberLauncher"', 'android:name=".WholphinLauncher1280"'],
+]);
 const art = path.join(project, "app/src/main/res/drawable-nodpi");
 await fs.copyFile(path.join(fork, "assets/firetv/wholphin_banner.png"), path.join(art, "ember_launcher_tile.png"));
 await fs.copyFile(path.join(fork, "assets/firetv/wholphin_icon.png"), path.join(art, "ember_app_icon.png"));
