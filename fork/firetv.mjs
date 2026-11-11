@@ -81,6 +81,12 @@ for (const f of platformFiles) await fs.copyFile(path.join(root, "platforms/fire
       '      return { native: false, reason: "Video range is not supported by the connected display" };',
       "      return toneMapped;",
     ],
+    // Converted video as MPEG-TS instead of fragmented MP4: after a seek Media3 failed on
+    // Jellyfin's fMP4 segments ("Top bit not zero") and the app fell back to compatibility.
+    [
+      'fallback.TranscodingProfiles.unshift({ Container: "mp4", Type: "Video"',
+      'fallback.TranscodingProfiles.unshift({ Container: "ts", Type: "Video"',
+    ],
     [
       'VideoCodec: remux.join(","),',
       'VideoCodec: remux.slice().sort(function (a, b) { return (b === "hevc") - (a === "hevc"); }).join(","),',
@@ -181,6 +187,8 @@ await edit("app/src/main/AndroidManifest.xml", [
   ['android:label="Ember"', 'android:label="Wholphin"', true],
   ['android:icon="@drawable/ember_launcher_tile"', 'android:icon="@drawable/ember_app_icon"', true],
   ['android:name=".EmberLauncher"', 'android:name=".WholphinLauncher3"'],
+  // One instance only: starting the app again brings the open one to the front.
+  ['<activity android:name=".MainActivity" android:exported="true"', '<activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask"'],
 ]);
 const art = path.join(project, "app/src/main/res/drawable-nodpi");
 await fs.copyFile(path.join(fork, "assets/firetv/wholphin_banner.png"), path.join(art, "ember_launcher_tile.png"));
