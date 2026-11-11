@@ -68,6 +68,19 @@ for (const f of platformFiles) await fs.copyFile(path.join(root, "platforms/fire
         '      return { native: true, reason: "Server converts the video for the Fire TV decoder, audio stays" };\n' +
         "    }",
     ],
+    // HDR on a display without HDR (or a switched-off HDR format): the original went to its
+    // compatibility profile too; the server tone-maps HDR to SDR instead and audio stays.
+    [
+      '    if ((caps.blockedRanges || []).indexOf(range) >= 0) return {native: false, reason: "This HDR format is disabled on this Fire TV"};',
+      "    var toneMapped = nativeSubtitle(source, index == null ? -1 : index)\n" +
+        '      ? { native: true, reason: "Server tone-maps HDR to SDR for this display, audio stays" }\n' +
+        '      : { native: false, reason: "Selected subtitles require server conversion" };\n' +
+        "    if ((caps.blockedRanges || []).indexOf(range) >= 0) return toneMapped;",
+    ],
+    [
+      '      return { native: false, reason: "Video range is not supported by the connected display" };',
+      "      return toneMapped;",
+    ],
     [
       'VideoCodec: remux.join(","),',
       'VideoCodec: remux.slice().sort(function (a, b) { return (b === "hevc") - (a === "hevc"); }).join(","),',
