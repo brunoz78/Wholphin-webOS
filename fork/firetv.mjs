@@ -161,9 +161,12 @@ await edit("app/build.gradle", [
   ],
 ]);
 // The launcher keeps a tile's picture per launcher entry: a new picture needs a new entry name.
+// Fire OS shows sideloaded apps by their icon (square, on a grey tile), not by the banner: the
+// icon is the square dolphin, the banner stays the wide picture.
 await edit("app/src/main/AndroidManifest.xml", [
   ['android:label="Ember"', 'android:label="Wholphin"', true],
-  ['android:name=".EmberLauncher"', 'android:name=".WholphinLauncher1280"'],
+  ['android:icon="@drawable/ember_launcher_tile"', 'android:icon="@drawable/ember_app_icon"', true],
+  ['android:name=".EmberLauncher"', 'android:name=".WholphinLauncher2"'],
 ]);
 const art = path.join(project, "app/src/main/res/drawable-nodpi");
 await fs.copyFile(path.join(fork, "assets/firetv/wholphin_banner.png"), path.join(art, "ember_launcher_tile.png"));
