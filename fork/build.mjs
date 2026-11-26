@@ -780,15 +780,6 @@ for (const [from, why] of [
 ])
   await patch("app.js", from, from.replace('"button:not(:disabled)"', '"button:not(:disabled):not([hidden])"'), `Player options skip hidden buttons (${why})`);
 
-// Settings: up/down skips hidden rows. On Fire TV the hidden "Dolby Vision MP4" row after
-// "Playback mode" took the focus and the remote got stuck there.
-await patch(
-  "app.js",
-  'main.querySelectorAll(".setting-row:not(:disabled)"),',
-  'main.querySelectorAll(".setting-row:not(:disabled):not([hidden])"),',
-  "Settings skip hidden rows",
-);
-
 // Rewind on resume (fork/extras.js): resuming starts a few seconds before the saved position.
 await patch(
   "app.js",
