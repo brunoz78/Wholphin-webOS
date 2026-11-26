@@ -60,7 +60,19 @@
         if (imageRequests.get(img) === request) img.dispatchEvent(new Event("error"));
       });
   }
+  var deviceIdentity = capabilities(),
+    deviceName = deviceIdentity.deviceName || "Fire TV",
+    playbackName = deviceIdentity.playbackName || deviceName + " Media3";
   root.EmberPlatform = {
+    setSystemProfile: function (profile) {
+      try { root.EmberAndroid.systemProfile(profile); } catch (_) {}
+    },
+    syncContinueWatching: function (request) {
+      try { root.EmberAndroid.syncWatchNext(JSON.stringify(request)); } catch (_) {}
+    },
+    takeSystemResume: function (profile) {
+      try { return JSON.parse(root.EmberAndroid.takeSystemResume(profile) || "null"); } catch (_) { return null; }
+    },
     appVersion: function () { try { return root.EmberAndroid.appVersion(); } catch (_) { return ""; } },
     updateApp: function (action, callback) {
       if (callback) updateListener = callback;
@@ -71,7 +83,7 @@
         var id = ++seerrId;
         seerrJobs[id] = {resolve: resolve, reject: reject, timer: setTimeout(function () { delete seerrJobs[id]; reject(new Error("Seerr request timed out. Try again.")); }, 45000)};
         try { root.EmberAndroid.seerrRequest(JSON.stringify(Object.assign({id: id}, values))); }
-        catch (_) { clearTimeout(seerrJobs[id].timer); delete seerrJobs[id]; reject(new Error("Update the Fire TV app to connect to Seerr.")); }
+        catch (_) { clearTimeout(seerrJobs[id].timer); delete seerrJobs[id]; reject(new Error("Update the Ember app to connect to Seerr.")); }
       });
     },
     displayMatching: function () { var modes = capabilities().displayMatching; return modes && (modes.rate || modes.resolution) ? modes : null; },
@@ -88,15 +100,15 @@
     playbackProfile: function (fallback, source) { return root.EmberFirePlayback.profile(playbackCapabilities(), fallback, source); },
     playbackTracks: function () { return root.EmberFirePlayback.tracks.apply(null, arguments); },
     id: "firetv",
-    deviceName: "Fire TV",
-    playbackName: "Fire TV Media3",
+    deviceName: deviceName,
+    playbackName: playbackName,
     nativePlayback: false,
     keyCode: function (event) { return event.keyCode; },
     exit: function () { command("exit"); },
     createPlayer: function (element) {
       var source = "", id = 0, ready = false, paused = true, seeking = false,
         time = 0, duration = NaN, width = 0, height = 0, error = null, trackChange = null,
-        range = null, format = null, pending = [], lastRect = "", media = {}, mediaKey = "", tracks = { audio: -1, subtitle: -1 };
+        range = null, format = null, diagnostics = null, pending = [], lastRect = "", media = {}, mediaKey = "", tracks = { audio: -1, subtitle: -1 };
       function settleTracks(reason) {
         if (!trackChange) return;
         root.clearTimeout(trackChange.timer);
@@ -133,13 +145,14 @@
         if (typeof data.paused === "boolean") paused = data.paused;
         width = data.width || 0; height = data.height || 0;
         format = data.format || null;
+        diagnostics = data.diagnostics || null;
         range = data.seekEnd > data.seekStart ? [data.seekStart / 1000, data.seekEnd / 1000] : null;
         if (data.type === "loadedmetadata") ready = true;
         if (data.type === "seeked") seeking = false;
         if (data.type === "playing") settle();
         if (data.type === "ended") paused = true;
         if (data.type === "error") {
-          error = { code: 4, message: "Fire TV playback failed." };
+          error = { code: 4, message: deviceName + " playback failed." };
           settle(new Error(error.message));
         }
         rect();
@@ -157,6 +170,15 @@
           mediaKey = key;
         },
         nativeFormat: function () { return format; },
+        nativeDiagnostics: function () { return diagnostics; },
+        setArtwork: function (request) {
+          try { root.EmberAndroid.artwork(JSON.stringify(request)); } catch (_) {}
+        },
+        getVideoPlaybackQuality: function () {
+          return { droppedVideoFrames: diagnostics && diagnostics.dropped,
+            totalVideoFrames: diagnostics && Number.isFinite(diagnostics.rendered) && Number.isFinite(diagnostics.dropped)
+              ? diagnostics.rendered + diagnostics.dropped : null };
+        },
         selectTracks: function (value) {
           if (!source || !ready || value.unavailable) return Promise.reject(new Error("Native tracks are unavailable"));
           settleTracks(new Error("Track change replaced"));
@@ -171,7 +193,7 @@
           send("close");
           id++;
           ready = false; paused = true; seeking = false;
-          time = 0; duration = NaN; range = null; format = null; error = null; lastRect = "";
+          time = 0; duration = NaN; range = null; format = null; diagnostics = null; error = null; lastRect = "";
           if (source) { send("load", { url: source.split("#")[0], tracks: tracks, media: media }); rect(); }
         },
         play: function () {

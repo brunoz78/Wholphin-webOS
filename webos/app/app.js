@@ -7,7 +7,9 @@
     status = document.getElementById("status"),
     video = P.createPlayer(document.getElementById("video")),
     player = document.getElementById("player");
-  var session = null,
+  var hostedSeerr = location.protocol === "https:" && location.pathname === "/ember-tv/",
+    requestsPluginAccount = null,
+    session = null,
     playing = null,
     livePreview = false,
     stack = [],
@@ -288,6 +290,7 @@
     if (homeRowObserver) homeRowObserver.disconnect();
     if (posterObserver) posterObserver.disconnect();
     main.refreshPlaybackUserData = null;
+    main.refreshPlaybackRows = null;
     main.textContent = "";
     main.className = "";
     main.scrollTop = 0;
@@ -505,6 +508,7 @@
       : null;
   }
   function navigation() {
+    if (P.setSystemProfile) P.setSystemProfile(document.body.classList.contains("choosing-profile") ? "" : systemProfile(session));
     document.getElementById("profile-initial").textContent =
       session && session.name ? session.name.charAt(0).toUpperCase() : "U";
     document.getElementById("profile-initial").hidden = bonfireAvailable;
@@ -512,6 +516,7 @@
       session && session.token
         ? session.server +
           session.user +
+          String(requestsPluginAccount === session) +
           String(bonfireAvailable) +
           JSON.stringify(bonfireProfile) +
           JSON.stringify(
@@ -618,7 +623,9 @@
     );
     entry("Favorites", "favorites", function () { return go(favorites); }, "favorites");
     libraries.filter(function (item) { return libraryRank(item) >= 4; }).forEach(libraryEntry);
-    if (P.seerrRequest) entry("Seerr", "search", function () { return go(seerrDiscover); }, "seerr");
+    if (P.seerrRequest || hostedSeerr || requestsPluginAccount === session)
+      entry("Requests", "search", function () { return go(seerrDiscover); }, "seerr");
+    entry("Watch Together", "movie", function () { return go(watchTogetherPage); }, "watch-together");
     entry(
       "Settings",
       "settings",
@@ -675,6 +682,7 @@
   }
   async function signOut() {
     try { await stop(); } catch (_) {}
+    await leaveWatchGroup(true);
     try {
       var root = profileAccount();
       await Promise.allSettled([
@@ -716,7 +724,7 @@
       var category = button(
         title,
         function () {
-          focusContent(area.querySelector("button"));
+          focusContent(area.querySelector(".setting-row:not(:disabled):not([hidden])"));
         },
         categories,
       );
@@ -977,14 +985,14 @@
       },
     );
     vision.disabled = !decoder.native;
-    if (P.hdrOptions) row(device, "HDR formats", "", "Detected support and format overrides for this Fire TV.", function () { return go(hdrSettings); });
+    if (P.hdrOptions) row(device, "HDR formats", "", "Detected support and format overrides for this device.", function () { return go(hdrSettings); });
     if (P.nativePlayback === false) {
       modeControl.disabled = !P.playbackPolicy;
       vision.hidden = true;
     }
     row(device, "Screensaver", "", "Artwork, idle delay and clock for this profile.", function () { return go(screensaverSettings); });
     var about = section("About", "Ember for Jellyfin" + (P.appVersion && P.appVersion() ? " · v" + P.appVersion() : ""));
-    if (P.updateApp) row(about, "App updates", "", "Check GitHub Releases for Fire TV updates.", function () { return go(appUpdates); });
+    if (P.updateApp) row(about, "App updates", "", "Check GitHub Releases for Ember updates.", function () { return go(appUpdates); });
     var server = el("p", "Connected to " + session.server, about);
     server.className = "settings-description";
     row(
@@ -1030,7 +1038,7 @@
     el("p", "Installed version: " + (P.appVersion() || "Unknown"), main);
     var state = el("p", "Checking GitHub Releases…", main);
     state.setAttribute("role", "status");
-    var help = el("p", "Updates come from JoeKer1/Wholphin-webOS on GitHub. Fire TV will ask you to confirm installation. Your sign-in and settings are kept.", main);
+    var help = el("p", "Updates come from JoeKer1/Wholphin-webOS on GitHub. Android will ask you to confirm installation. Your sign-in and settings are kept.", main);
     help.className = "settings-description";
     var list = el("div", null, main); list.className = "screensaver-settings";
     var check = button("Check for updates", function () { P.updateApp("check"); }, list);
@@ -1748,6 +1756,15 @@
     if (!libraryRequest) {
       var current = session,
         key = accountKey("libraries");
+      if (!P.seerrRequest && !hostedSeerr) {
+        api("/Ember/Requests/status", null, null, "GET", {session: current, timeoutMs: 5000})
+          .then(function (result) {
+            if (session !== current) return;
+            requestsPluginAccount = result && result.enabled === true ? current : null;
+            navigation();
+          })
+          .catch(function () {});
+      }
       var request = api("/Users/" + session.user + "/Views")
         .then(function (data) {
           if (session !== current) return data.Items || [];
@@ -1793,7 +1810,58 @@
   }
   function seerrApi(path, body, server, account) {
     account = account || session;
+    if (requestsPluginAccount === account) {
+      return api("/Ember/Requests/api" + path, null, body, body ? "POST" : "GET", {
+        session: account, timeoutMs: 25000,
+      });
+    }
+    if (hostedSeerr) return hostedSeerrRequest(path, body, account);
     return P.seerrRequest({server: server || seerrSettingsValue().server, profile: "wholphin-seerr:" + account.server + ":" + account.user, path: path, method: body ? "POST" : "GET", body: body});
+  }
+  async function hostedSeerrRequest(path, body, account) {
+    var user = String(account.user).replace(/-/g, "").toLowerCase();
+    if (!/^[a-f0-9]{32}$/.test(user) || new URL(account.server).origin !== location.origin)
+      throw new Error("Sign in to Jellyfin at this Ember page’s address to use Seerr.");
+    var controller = new AbortController();
+    var timer = setTimeout(function () { controller.abort(); }, 15000);
+    try {
+      var prefix = "/ember-seerr/" + user;
+      if (body) {
+        var statusResponse = await fetch(prefix + "/status", {
+          headers: {"X-Ember-Seerr": "1"},
+          credentials: "same-origin",
+          redirect: "error",
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (!statusResponse.ok) throw new Error("Could not prepare the Seerr request.");
+      }
+      var response = await fetch(prefix + path, {
+        method: body ? "POST" : "GET",
+        headers: {"Content-Type": "application/json", "X-Ember-Seerr": "1"},
+        body: body ? JSON.stringify(body) : undefined,
+        credentials: "same-origin",
+        redirect: "error",
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        var error = new Error("Seerr request failed (" + response.status + ").");
+        error.status = response.status;
+        throw error;
+      }
+      if (response.status === 204) return null;
+      var result = await response.json();
+      if (path === "/auth/me" &&
+          String(result && result.jellyfinUserId).replace(/-/g, "").toLowerCase() !== user) {
+        var mismatch = new Error("Seerr returned a different profile.");
+        mismatch.status = 401;
+        throw mismatch;
+      }
+      return result;
+    } finally {
+      clearTimeout(timer);
+    }
   }
   async function connectSeerrProfile(server, account, valid, force) {
     function current() {
@@ -1922,19 +1990,21 @@
   }
   var seerrBrowseStates = new Map();
   async function seerrDiscover() {
-    var r = reset("Seerr"), account = session, me;
+    var r = reset("Requests"), account = session, me;
+    var serverManaged = hostedSeerr || requestsPluginAccount === account;
     main.className = "seerr-page"; selectNav("seerr");
     var feedback = el("p", "Loading Seerr connection from Jellyfin…", main); feedback.setAttribute("role", "status");
     await syncLanguagePreferences();
     if (r !== revision || session !== account) return;
-    if (!seerrSettingsValue().server || seerrSettingsValue().disabled) return seerrSettings(true);
+    if (!serverManaged && (!seerrSettingsValue().server || seerrSettingsValue().disabled)) return seerrSettings(true);
     feedback.textContent = "Connecting to Seerr…";
     try { me = await connectSeerrProfile(seerrSettingsValue().server, account, function () { return r === revision; }); }
     catch (error) {
       if (r !== revision) return;
       feedback.textContent = error.message;
       button("Retry connection", function () { return seerrDiscover(); }, main);
-      button("Seerr sign-in settings", function () { return go(seerrSettings); }, main); focusFirst(); return;
+      if (!serverManaged) button("Seerr sign-in settings", function () { return go(seerrSettings); }, main);
+      focusFirst(); return;
     }
     if (r !== revision || session !== account) return;
     feedback.textContent = "Signed in as " + (me.displayName || me.username || me.jellyfinUsername || "Seerr user") + ".";
@@ -2002,7 +2072,7 @@
       return load();
     }
     [["Trending", "/discover/trending"], ["Movies", "/discover/movies", "movie"], ["TV", "/discover/tv", "tv"], ["Upcoming", "/discover/movies/upcoming", "movie"], ["My requests", "/request?requestedBy=" + me.id + "&take=20"]].forEach(function (tab) { button(tab[0], function () { browse.apply(null, tab); }, tabs); });
-    button("Seerr settings", function () { return go(seerrSettings); }, tabs);
+    if (!serverManaged) button("Seerr settings", function () { return go(seerrSettings); }, tabs);
     form.onsubmit = function (event) { event.preventDefault(); if (input.value.trim()) browse("Search results", "/search?query=" + encodeURIComponent(input.value.trim().slice(0, 150))); };
     var onScroll = function () { if (!valid()) return; if (main.scrollHeight - main.scrollTop - main.clientHeight < 700) load(); };
     main.addEventListener("scroll", onScroll);
@@ -2151,7 +2221,7 @@
       if (type === "movie" && [2, 3, 5, 6].indexOf(is4k ? info.status4k : info.status) >= 0) feedback.textContent = (is4k ? "4K" : "Standard") + " is already requested or available.";
     }
     button("Refresh title and permissions", function () { return seerrDetail(type, id, me); }, main);
-    var returnButton = button("Back to Seerr", back, main);
+    var returnButton = button("Back to Requests", back, main);
     focusContent(submit && !submit.disabled ? submit : (seasons && seasons.querySelector("button:not(:disabled)")) || actions.querySelector("button") || returnButton);
   }
   async function favorites() {
@@ -2228,6 +2298,8 @@
   }
   async function profilesPage() {
     if (playing) await stop();
+    await leaveWatchGroup(true);
+    if (P.setSystemProfile) P.setSystemProfile("");
     var r = reset("Who's watching?"),
       account = profileAccount(),
       current = session;
@@ -2572,9 +2644,10 @@
       input.value = value || "";
       return input;
     }
-    var server = field("Server URL", "text", session && session.server),
+    var server = field("Server URL", "text", hostedSeerr ? location.origin : session && session.server),
       user = field("Username", "text"),
       password = field("Password", "password");
+    if (hostedSeerr) server.readOnly = true;
     password.required = false;
     var serverError = el("p", "", form), userError = el("p", "", form);
     serverError.id = "server-error"; userError.id = "username-error";
@@ -3032,7 +3105,32 @@
     if (!items.length && !existing) el("p", "No items found.", parent);
     return grid;
   }
+  function systemProfile(account) {
+    return account && account.token ? JSON.stringify([account.server, account.user]) : "";
+  }
+  function publishSystemContinueWatching(items, account) {
+    if (!P.syncContinueWatching || session !== account) return;
+    P.syncContinueWatching({
+      profile: systemProfile(account), server: account.server, token: account.token,
+      items: C.combineResume(items, []).slice(0, 12).map(function (item) {
+        return { id: item.Id, artworkItem: item.SeriesId || item.Id, title: item.SeriesName || item.Name,
+          subtitle: item.SeriesName ? item.Name : "", episode: item.Type === "Episode",
+          position: Math.max(0, Number(item.UserData && item.UserData.PlaybackPositionTicks) / 10000 || 0),
+          duration: Math.max(0, Number(item.RunTimeTicks) / 10000 || 0) };
+      }),
+    });
+  }
+  async function resumeFromSystem() {
+    if (!P.takeSystemResume || !session || busy || document.hidden ||
+        document.body.classList.contains("choosing-profile")) return;
+    var account = session, link = P.takeSystemResume(systemProfile(account));
+    if (!link || link.profile !== systemProfile(account) || !/^[a-zA-Z0-9-]{1,128}$/.test(link.item)) return;
+    var item = await api("/Users/" + encodeURIComponent(account.user) + "/Items/" + encodeURIComponent(link.item), null, null, "GET", { session: account });
+    if (session === account && !document.hidden) await play(item, 0, true, false);
+  }
+  document.addEventListener("ember-system-resume", function () { run(resumeFromSystem); });
   async function fetchHomeRow(row, signal) {
+    var rowAccount = session;
     function request(path, values) {
       return api(path, values, null, "GET", { signal: signal });
     }
@@ -3046,6 +3144,7 @@
         IncludeItemTypes: row.parent ? row.type || "Episode" : undefined,
         Fields: fields,
       }).then(function (data) {
+        if (!row.parent) publishSystemContinueWatching(data.Items || [], rowAccount);
         return data.Items || [];
       });
     }
@@ -3177,6 +3276,7 @@
   async function home(tvLibraryItem) {
     var r = reset(tvLibraryItem ? tvLibraryItem.Name : "Home"),
       options = homeOptions();
+    if (P.setSystemProfile) P.setSystemProfile(systemProfile(session));
     homeController = new AbortController();
     var homeSignal = homeController.signal,
       earlyRows = new Map();
@@ -3368,16 +3468,21 @@
       el("h2", row.title, section);
       var key = accountKey("row:") + row.key,
         cached = homeCache.get(key),
-        queued = false;
+        queued = false,
+        refreshAfterRequest = false;
       function schedule(force) {
-        if (!valid() || queued) return;
+        if (!valid()) return;
+        if (queued) {
+          if (force) refreshAfterRequest = true;
+          return;
+        }
         if (!force && cached && Date.now() - cached.time < 60000) return;
         queued = true;
         if (homeRowObserver) homeRowObserver.unobserve(section);
         queue.push(async function () {
           if (!valid()) return;
           try {
-            var early = earlyRows.get(row.key);
+            var early = !force && earlyRows.get(row.key);
             earlyRows.delete(row.key);
             var result = early && (await early);
             if (result && result.error) throw result.error;
@@ -3411,6 +3516,10 @@
             }
           } finally {
             queued = false;
+            if (refreshAfterRequest) {
+              refreshAfterRequest = false;
+              schedule(true);
+            }
           }
         });
         pump();
@@ -3438,6 +3547,12 @@
       }
       if (index < 2 || (cached && !cached.items.length)) schedule();
     });
+    main.refreshPlaybackRows = function () {
+      plan.forEach(function (row, index) {
+        if (["combined", "resume", "next"].indexOf(row.kind) >= 0)
+          rows.children[index].loadHomeRow(true);
+      });
+    };
     if (window.IntersectionObserver) {
       homeRowObserver = new IntersectionObserver(
         function (entries) {
@@ -3459,6 +3574,7 @@
     }
     var first = rows.querySelector("section:not([hidden]) button");
     if (first) first.focus();
+    run(resumeFromSystem);
   }
   function tvTabs(library, selected) {
     var tabs = el("div", null, main);
@@ -4754,6 +4870,59 @@
       ? date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
       : "";
   }
+  async function liveDvr(scheduled, startIndex) {
+    var r = reset(scheduled ? "Scheduled recordings" : "Recordings");
+    var account = session;
+    var actions = el("div", null, main);
+    actions.className = "actions";
+    var backButton = button("Back", back, actions);
+    backButton.focus();
+    var results = el("section", null, main);
+    var loading = el("p", "Loading…", results);
+    try {
+      var data = await api(scheduled ? "/LiveTv/Timers" : "/LiveTv/Recordings", scheduled
+        ? { IsScheduled: true }
+        : { UserId: account.user, IsInProgress: false, StartIndex: startIndex, Limit: 48 });
+      if (r !== revision || session !== account) return;
+      loading.remove();
+      var items = data.Items || [];
+      if (!items.length) el("p", scheduled ? "No scheduled recordings." : "No recordings.", results);
+      if (scheduled) {
+        items.forEach(function (timer) {
+          var row = el("div", null, results);
+          el("h2", timer.Name || "Scheduled program", row);
+          el("p", [timer.ChannelName, new Date(timer.StartDate).toLocaleString()].filter(Boolean).join(" · "), row);
+          if (!timer.Id) return;
+          var cancel = button("Cancel recording", async function () {
+            if (cancel.disabled || !window.confirm("Cancel recording for " + timer.Name + "?")) return;
+            cancel.disabled = true;
+            try {
+              await api("/LiveTv/Timers/" + encodeURIComponent(timer.Id), null, null, "DELETE", { session: account });
+              if (r !== revision || session !== account) return;
+              row.remove();
+              if (!results.children.length) el("p", "No scheduled recordings.", results);
+              backButton.focus();
+            } finally {
+              cancel.disabled = false;
+            }
+          }, row);
+          cancel.setAttribute("aria-label", "Cancel recording for " + timer.Name);
+        });
+      } else {
+        cards(items, results, null, null, function (item) {
+          return play(item, (item.UserData && item.UserData.PlaybackPositionTicks) || 0, false, false);
+        });
+        if (startIndex > 0)
+          button("Previous recordings", function () { return liveDvr(false, Math.max(0, startIndex - 48)); }, actions);
+        if (items.length === 48 && (data.TotalRecordCount == null || startIndex + items.length < data.TotalRecordCount))
+          button("More recordings", function () { return liveDvr(false, startIndex + items.length); }, actions);
+      }
+    } catch (error) {
+      if (r !== revision || session !== account) return;
+      loading.textContent = "Could not load recordings. " + error.message;
+      button("Retry", function () { return liveDvr(scheduled, startIndex); }, actions);
+    }
+  }
   async function liveGuide(state) {
     var r = reset("Live TV");
     selectNav("livetv");
@@ -4845,6 +5014,21 @@
       },
       toolbar,
     );
+    button("Program details", function () {
+      var cached = state.cache.get(state.focusChannel);
+      var programme = cached && cached.data && (state.focusColumn === 2 ? cached.data.next : cached.data.current);
+      if (!programme) {
+        message("Select a program in the guide first.");
+        return;
+      }
+      return go(function () { return detail(programme.Id, true); });
+    }, toolbar);
+    button("Recordings", function () {
+      return go(function () { return liveDvr(false, 0); });
+    }, toolbar);
+    button("Scheduled recordings", function () {
+      return go(function () { return liveDvr(true); });
+    }, toolbar);
     el(
       "p",
       new Date(state.at).toLocaleString([], {
@@ -4933,12 +5117,12 @@
       document.getElementById("live-browse-overview").textContent = programme
         ? programme.Overview || "No description available."
         : !cached
-          ? "Loading programme details…"
+          ? "Loading program details…"
           : cached.error
-            ? "Programme details are unavailable. Retry listings for this channel."
+            ? "Program details are unavailable. Retry listings for this channel."
             : column === 2
-              ? "No upcoming programme listed."
-              : "No programme listed for this channel.";
+              ? "No upcoming program listed."
+              : "No program listed for this channel.";
     }
     function watchChannel(channel, programme) {
       return play(
@@ -4975,7 +5159,7 @@
         cell.textContent = "";
         var programme = index === 0 ? result.current : result.next;
         if (!programme) {
-          if (index === 0) watchCell(cell, channel, "No programme listed");
+          if (index === 0) watchCell(cell, channel, "No program listed");
           else el("p", "No upcoming listing", cell);
           return;
         }
@@ -4996,7 +5180,7 @@
           index + 1,
           programme.Id,
         );
-        el("span", programme.Name || "Untitled programme", control).className =
+        el("span", programme.Name || "Untitled program", control).className =
           "guide-programme-title";
         el(
           "span",
@@ -5182,7 +5366,7 @@
       for (var i = 0; i < 2; i++) {
         var cell = el("div", null, row);
         cell.className = "guide-programme";
-        if (i === 0) watchCell(cell, channel, "Loading programme…");
+        if (i === 0) watchCell(cell, channel, "Loading program…");
         else el("p", "Loading…", cell);
       }
       return row;
@@ -6057,6 +6241,27 @@
         },
         actions,
       );
+      if (!item.TimerId && Date.parse(item.EndDate) > Date.now()) {
+        var account = session;
+        var record = button("Record program", async function () {
+          if (record.disabled || Date.parse(item.EndDate) <= Date.now()) return;
+          record.disabled = true;
+          try {
+            var defaults = await api("/LiveTv/Timers/Defaults", { ProgramId: item.Id }, null, "GET", { session: account });
+            if (!record.isConnected || session !== account) return;
+            await api("/LiveTv/Timers", null, Object.assign({}, defaults, { ProgramId: item.Id }), "POST", { session: account });
+            if (!record.isConnected || session !== account) return;
+            labelAction(record, "Recording scheduled");
+            message("Recording scheduled.");
+          } catch (error) {
+            if (record.isConnected && session === account) message(error.message);
+          } finally {
+            record.disabled = record.getAttribute("aria-label") === "Recording scheduled";
+          }
+        }, actions);
+      } else if (item.TimerId) {
+        el("p", "Recording scheduled", main).className = "metadata";
+      }
     } else if (item.Type === "Series") {
       var seriesPlay = button(
         "Play",
@@ -6956,7 +7161,7 @@
   function hdrSettings() {
     reset("HDR formats");
     var options = P.hdrOptions(), caps = P.playbackDiagnostics();
-    el("p", "Applies to this Fire TV for all profiles, starting with the next video. Automatic uses detected support; disabling a format requests compatible server conversion.", main);
+    el("p", "Applies to this device for all profiles, starting with the next video. Automatic uses detected support; disabling a format requests compatible server conversion.", main);
     el("p", "Display reports: " + ((caps.displayHdrTypes || []).join(", ") || "No HDR formats reported"), main);
     el("p", "Dolby Vision hardware decoder: " + (caps.dolbyVisionDecoder ? "Detected" : "Not detected") + ". Decoder availability alone does not guarantee support for every Dolby Vision profile.", main);
     var list = el("div", null, main); list.className = "screensaver-settings";
@@ -6969,6 +7174,19 @@
       function refresh() { control.textContent = entry[1] + ": " + (options[entry[0]] === "off" ? "Disabled" : "Automatic"); }
       refresh();
     });
+    var conversion = button("", function () {
+      options.convertProfile7 = options.convertProfile7 !== true;
+      P.saveHdrOptions(options);
+      refreshConversion();
+    }, list);
+    function refreshConversion() {
+      conversion.textContent = "Convert Dolby Vision profile 7 (experimental): " + (options.convertProfile7 === true ? "On" : "Off");
+      conversion.disabled = options.convertProfile7 !== true && !caps.dolbyVisionConversionAvailable;
+    }
+    refreshConversion();
+    el("p", caps.dolbyVisionConversionAvailable
+      ? "Conversion uses profile 8.1 and discards the enhancement layer. Applies to the next video."
+      : "Conversion requires a Dolby Vision display and a profile 8 decoder on a device without profile 7 decoding.", main);
     button("Reset HDR formats to Automatic", function () { P.saveHdrOptions({}); return hdrSettings(); }, list);
     focusContent(list.querySelector("button"));
   }
@@ -7147,21 +7365,21 @@
     }
   }
   function updatePlaybackButtons() {
-    var active = playing;
+    var active = playing, synced = active && watchActive(active.watchGroup);
     document.getElementById("audio").disabled =
-      !active || active.live || !C.tracks(active.source, "Audio").length;
+      !active || synced || active.live || !C.tracks(active.source, "Audio").length;
     document.getElementById("subtitles").disabled =
-      !active || active.live || !C.tracks(active.source, "Subtitle").length;
+      !active || synced || active.live || !C.tracks(active.source, "Subtitle").length;
     document.getElementById("subtitle-timing").disabled = !active || active.live;
-    document.getElementById("subtitle-appearance").disabled = !active || active.live;
-    document.getElementById("quality").disabled = !active || active.live;
+    document.getElementById("subtitle-appearance").disabled = !active || synced || active.live;
+    document.getElementById("quality").disabled = !active || synced || active.live;
     document.getElementById("chapters").disabled =
       !active || active.live || !C.chapters(active.item).length;
     document.getElementById("previous-video").hidden = !!(active && active.live);
-    document.getElementById("previous-video").disabled = !active || active.live || !playbackHistory.length;
+    document.getElementById("previous-video").disabled = !active || synced || active.live || !playbackHistory.length;
     document.getElementById("next-video").hidden = !!(active && active.live);
     document.getElementById("next-video").disabled =
-      !active || active.live || (!queueItems.length && !active.episodes.length && !active.nextError);
+      !active || synced || active.live || (!queueItems.length && !active.episodes.length && !active.nextError);
     if (active && video.setMediaInfo) video.setMediaInfo({
       title: active.item.SeriesName || active.item.Name || "Ember",
       subtitle: active.item.SeriesName ? active.item.Name : "",
@@ -7209,7 +7427,7 @@
   }
   function updateSegment() {
     var active = playing;
-    if (!active || active.live || !active.started || video.seeking || livePreview || active.awaitingWatching ||
+    if (!active || watchActive(active.watchGroup) || active.live || !active.started || video.seeking || livePreview || active.awaitingWatching ||
         !document.getElementById("playback-panel").hidden ||
         !document.getElementById("player-tools").hidden) { hideSegment(); return; }
     var time = position() / 10000000, segment = (active.segments || []).find(function (s) {
@@ -7314,9 +7532,25 @@
     if (local) el("p", "Remembered only for this video's selected subtitle track.", container);
     refresh();
   }
-  var panelRequest = 0;
+  function nativePlaybackRows() {
+    var stats = video.nativeDiagnostics && video.nativeDiagnostics();
+    if (!stats) return [];
+    return [
+      ["Buffer ahead", (Math.max(0, stats.bufferMs) / 1000).toFixed(1) + " seconds"],
+      ["Native player state", ({1: "Idle", 2: "Buffering", 3: "Ready", 4: "Ended"})[stats.state] || "Unknown"],
+      ["Dropped frames", Number.isFinite(stats.dropped) && Number.isFinite(stats.rendered)
+        ? stats.dropped + " / " + (stats.dropped + stats.rendered) : "Not reported"],
+      ["Buffering after startup", stats.rebufferCount + " times · " + (stats.rebufferMs / 1000).toFixed(1) + " seconds"],
+      ["Video decoder", stats.videoDecoder || "Not reported"],
+      ["Audio decoder", stats.audioDecoder || "Not reported"],
+      ["Selected audio", [stats.audioMime, stats.audioChannels > 0 ? stats.audioChannels + " channels" : ""].filter(Boolean).join(" · ") || "Not reported"],
+      ["Video frame rate", stats.frameRate > 0 ? stats.frameRate.toFixed(3) + " fps" : "Not reported"],
+    ];
+  }
+  var panelRequest = 0, infoUpdate = null;
   function closePlaybackPanel(restore) {
     panelRequest++;
+    if (infoUpdate) { video.removeEventListener("timeupdate", infoUpdate); infoUpdate = null; }
     if (infoController) {
       infoController.abort();
       infoController = null;
@@ -7329,6 +7563,7 @@
     showControls();
   }
   async function openPlaybackPanel(kind) {
+    if (infoUpdate) { video.removeEventListener("timeupdate", infoUpdate); infoUpdate = null; }
     hideSegment();
     hideUpNext();
     closePlayerTools();
@@ -7418,6 +7653,11 @@
         rows.push(["Display HDR support", (detected.displayHdrTypes || []).join(", ") || "Not reported"]);
         rows.push(["Dolby Vision decoder", detected.dolbyVisionDecoder ? "Detected" : "Not detected"]);
         if (format) rows.push(["Selected native format", [format.mime, format.codecs, ({6: "PQ transfer", 7: "HLG transfer", 3: "SDR transfer"})[format.colorTransfer]].filter(Boolean).join(" · ")]);
+        if (video.nativeDiagnostics) {
+          rows = rows.filter(function (row) { return row[0] !== "Dropped frames"; });
+          rows = rows.concat(nativePlaybackRows());
+        }
+        if (detected.watchNextStatus) rows.push(["Home-screen Continue Watching", detected.watchNextStatus]);
       }
       var list = el("dl", null, content);
       list.className = "playback-info";
@@ -7428,6 +7668,19 @@
         el("dt", row[0], entry);
         el("dd", row[1], entry);
       });
+      if (video.nativeDiagnostics) {
+        var updatedAt = 0;
+        infoUpdate = function () {
+          if (playing !== active || token !== panelRequest || Date.now() - updatedAt < 1000) return;
+          updatedAt = Date.now();
+          nativePlaybackRows().forEach(function (row) {
+            Array.prototype.forEach.call(list.children, function (entry) {
+              if (entry.querySelector("dt").textContent === row[0]) entry.querySelector("dd").textContent = row[1];
+            });
+          });
+        };
+        video.addEventListener("timeupdate", infoUpdate);
+      }
       if (telemetryUnavailable)
         el(
           "p",
@@ -7483,6 +7736,8 @@
               return;
             }
             clearSeekState();
+            if (watchActive(active.watchGroup))
+              return watchApi(active.watchGroup, "Seek", {PositionTicks: chapter.StartPositionTicks});
             video.currentTime = chapter.StartPositionTicks / 10000000;
             closePlaybackPanel();
             return report("/Progress");
@@ -7571,6 +7826,7 @@
     }
   }
   async function switchTrack(subtitle, index) {
+    if (playing && watchActive(playing.watchGroup)) return message("Leave Watch Together to change tracks.");
     var active = playing;
     if (!active || active.live || busy || !active.started) return;
     var type = subtitle ? "Subtitle" : "Audio";
@@ -7642,6 +7898,7 @@
     }
   }
   async function switchQuality(active, maxBitrate) {
+    if (watchActive(active.watchGroup)) return message("Leave Watch Together to change quality.");
     if (playing !== active || busy || !active.started || active.live) return;
     if (active.maxBitrate === maxBitrate) { closePlaybackPanel(); return; }
     var ticks = position(), paused = video.paused;
@@ -7730,6 +7987,7 @@
       options = playbackOptions();
     if (
       !active ||
+      watchActive(active.watchGroup) ||
       active.live ||
       !active.started ||
       active.cancelAdvance ||
@@ -7759,6 +8017,7 @@
   async function advancePlayback(manual) {
     var active = playing;
     if (!active || active.live) return;
+    if (watchActive(active.watchGroup)) return;
     if (active.advancing) { if (!manual && active.completed) active.pendingAdvance = true; return; }
     if (busy) { if (!manual && active.completed) active.pendingAdvance = true; return; }
     active.pendingAdvance = false;
@@ -7811,25 +8070,29 @@
   }
   async function compatibilityPlayback(active, automatic) {
     if (playing !== active || busy || active.fallbackInProgress) return;
+    if (watchActive(active.watchGroup)) {
+      await leaveWatchGroup(true, "Left Watch Together after a playback problem.");
+      if (playing !== active || busy) return;
+    }
     active.fallbackInProgress = true;
     var ticks =
       automatic && active.lastPositionTicks != null
         ? active.lastPositionTicks
         : position();
     if (automatic) active.failurePositionTicks = ticks;
-    var paused = P.playbackPolicy && !active.hasPlayed ? active.pauseOnReady : video.paused;
+    var paused = !active.hasPlayed ? active.pauseOnReady : video.paused;
     video.pause();
     try {
       await play(active.item, ticks, false, false, {
         compatibility: true,
         trackChange: true,
-        paused: P.playbackPolicy ? paused : automatic ? false : paused,
+        paused: automatic && !P.playbackPolicy ? active.pauseOnReady : paused,
         mediaSourceId: active.source.Id,
         audioIndex: active.audioIndex,
         subtitleIndex: active.subtitleIndex,
         pendingPreference: active.pendingPreference,
         policyReason: automatic
-          ? "Native playback failed; retried with Compatibility"
+          ? active.fallbackReason + "; retried with Compatibility"
           : "Compatibility requested for this video",
       });
     } catch (error) {
@@ -7940,8 +8203,18 @@
   }
   function finishResume() {
     var active = playing;
-    if (!active || active.started || !active.metadataReady) return;
+    if (!active || active.started) return;
     var target = active.resume;
+    if (P.id === "webos" && !active.live && !document.hidden &&
+        Date.now() > active.resumeDeadline &&
+        (!active.metadataReady || !active.hasPlayed || video.seeking || Math.abs(video.currentTime - target) > 2)) {
+      playbackFailed(active, "Playback did not start in time",
+        target > 0
+          ? "Playback could not start at your saved position. Your saved position has been kept."
+          : "Playback did not start. Check the connection to Jellyfin and its transcoding logs.");
+      return;
+    }
+    if (!active.metadataReady) return;
     if (target > 0 && Math.abs(video.currentTime - target) > 2) {
       if (Date.now() > active.resumeDeadline) {
         message(
@@ -7987,8 +8260,231 @@
       return report("");
     });
   }
+  var watchGroup = null;
+
+  function watchApi(group, action, body) {
+    return api("/SyncPlay/" + action, null, body, "POST",
+      { session: group.account, timeoutMs: 5000 });
+  }
+  function watchActive(group) {
+    return group && watchGroup === group && session === group.account;
+  }
+  async function leaveWatchGroup(notifyServer, reason) {
+    var group = watchGroup;
+    if (!group) return;
+    watchGroup = null;
+    clearTimeout(group.commandTimer);
+    clearInterval(group.keepAlive);
+    clearInterval(group.clockTimer);
+    group.socket.close();
+    document.getElementById("leave-watch-group").hidden = true;
+    if (playing && playing.watchGroup === group) updatePlaybackButtons();
+    if (playing && playing.watchGroup === group && reason) video.pause();
+    if (reason) message(reason);
+    if (notifyServer) await watchApi(group, "Leave").catch(function () {});
+  }
+  async function watchClock(group) {
+    var sent = Date.now();
+    var clock = await api("/GetUtcTime", null, null, "GET", {session: group.account, timeoutMs: 5000});
+    var received = Date.now(), serverReceived = Date.parse(clock.RequestReceptionTime),
+      serverSent = Date.parse(clock.ResponseTransmissionTime);
+    if (!Number.isFinite(serverReceived) || !Number.isFinite(serverSent))
+      throw new Error("Could not synchronize the Jellyfin clock.");
+    group.clockOffset = ((serverReceived - sent) + (serverSent - received)) / 2;
+    group.ping = Math.round(Math.max(0, (received - sent - (serverSent - serverReceived)) / 2));
+  }
+  function watchReport(group, buffering) {
+    if (!watchActive(group) || !playing || playing.watchGroup !== group ||
+        playing.watchEntry !== group.entry || !group.entry) return;
+    var native = video.nativeDiagnostics && video.nativeDiagnostics();
+    if (!buffering && (!playing.started || video.seeking || video.readyState < 3 ||
+        (native && native.state !== 3))) return;
+    var state = buffering ? "Buffering" : "Ready";
+    if (group.playerState === state) return;
+    group.playerState = state;
+    run(async function () {
+      if (!watchActive(group) || group.playerState !== state) return;
+      try {
+        await watchApi(group, state, {
+          When: new Date(Date.now() + group.clockOffset).toISOString(),
+          PositionTicks: position(), IsPlaying: !video.paused,
+          PlaylistItemId: group.entry.PlaylistItemId,
+        });
+      } catch (_) {
+        if (watchActive(group)) await leaveWatchGroup(true, "Lost contact with the Watch Together group.");
+      }
+    });
+  }
+  function applyWatchCommand(group) {
+    var cmd = group.command, active = playing;
+    if (!watchActive(group) || !cmd || !active || active.watchGroup !== group ||
+        active.watchEntry !== group.entry || group.commandTimer || (!active.started && cmd.Command !== "Stop")) return;
+    var when = Date.parse(cmd.When) - group.clockOffset;
+    group.commandTimer = setTimeout(function () {
+      group.commandTimer = null;
+      if (!watchActive(group) || playing !== active || group.command !== cmd) return;
+      group.command = null;
+      if (cmd.Command === "Stop") return run(function () { return stop({ keepWatchGroup: true }); });
+      if (cmd.Command === "Pause") video.pause();
+      var target = Number(cmd.PositionTicks) / 10000000;
+      if (cmd.Command === "Unpause") target += Math.max(0, Date.now() - when) / 1000;
+      if (Number.isFinite(target) && Math.abs(video.currentTime - target) > (cmd.Command === "Seek" ? 0.05 : 0.35)) {
+        group.playerState = null;
+        video.currentTime = Math.max(0, target);
+      } else if (cmd.Command === "Seek") {
+        group.playerState = null;
+        watchReport(group, false);
+      }
+      if (cmd.Command === "Unpause") run(async function () {
+        try { await video.play(); }
+        catch (_) {
+          if (watchActive(group) && playing === active)
+            await leaveWatchGroup(true, "Could not resume the group video.");
+        }
+      });
+    }, Math.min(10000, Math.max(0, when - Date.now())));
+  }
+  function watchQueue(group, queue) {
+    var entry = queue.Playlist && queue.Playlist[queue.PlayingItemIndex];
+    if (!entry || !entry.ItemId || !entry.PlaylistItemId) {
+      clearTimeout(group.commandTimer);
+      group.commandTimer = null;
+      group.entry = null;
+      group.command = null;
+      if (playing && playing.watchGroup === group) run(function () { return stop({keepWatchGroup: true}); });
+      return;
+    }
+    if (group.entry && group.entry.PlaylistItemId === entry.PlaylistItemId) return;
+    group.entry = entry;
+    group.command = null;
+    group.playerState = null;
+    clearTimeout(group.commandTimer);
+    group.commandTimer = null;
+    group.loading = group.loading.catch(function () {}).then(async function () {
+      if (!watchActive(group) || group.entry !== entry) return;
+      var item = await api("/Users/" + encodeURIComponent(group.account.user) + "/Items/" + encodeURIComponent(entry.ItemId),
+        null, null, "GET", {session: group.account, timeoutMs: 5000});
+      if (!watchActive(group) || group.entry !== entry) return;
+      if (item.MediaType !== "Video" || item.IsFolder || item.Type === "TvChannel")
+        throw new Error("Watch Together supports on-demand videos.");
+      await play(item, Math.max(0, Number(queue.StartPositionTicks) || 0), false, false,
+        {paused: true, watchGroup: group, watchEntry: entry});
+      if (watchActive(group) && group.entry === entry && (!playing || playing.watchEntry !== entry))
+        throw new Error("Could not start the group video.");
+    }).catch(function (error) {
+      if (watchActive(group) && group.entry === entry) return leaveWatchGroup(true, error.message);
+    });
+  }
+  async function connectWatchGroup(name, groupId) {
+    if (watchGroup) return;
+    var account = session, url = new URL(account.server + "/socket");
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    url.search = C.query({api_key: account.token, deviceId: device});
+    var socket = new WebSocket(url.href);
+    var group = {account: account, socket: socket, name: name, loading: Promise.resolve()};
+    watchGroup = group;
+    try {
+      socket.onmessage = function (event) {
+        if (!watchActive(group)) return;
+        var packet;
+        try { packet = JSON.parse(event.data); } catch (_) { return; }
+        var data = packet && packet.Data;
+        if (packet && packet.MessageType === "ForceKeepAlive") {
+          clearInterval(group.keepAlive);
+          var seconds = Number(data);
+          if (seconds > 0) group.keepAlive = setInterval(function () {
+            if (socket.readyState === 1) socket.send(JSON.stringify({MessageType: "KeepAlive"}));
+          }, Math.max(1000, seconds * 500));
+        } else if (packet && packet.MessageType === "SyncPlayGroupUpdate" && data) {
+          if (data.Type === "GroupJoined" && data.Data) {
+            group.joined = true;
+            group.name = data.Data.GroupName || group.name;
+          } else if (data.Type === "PlayQueue" && data.Data && group.joined) watchQueue(group, data.Data);
+          else if (["NotInGroup", "GroupLeft", "SyncPlayIsDisabled", "JoinGroupDenied", "CreateGroupDenied",
+            "GroupDoesNotExist", "LibraryAccessDenied"].indexOf(data.Type) >= 0)
+            run(function () { return leaveWatchGroup(false, "Jellyfin could not keep you in the Watch Together group."); });
+        } else if (packet && packet.MessageType === "SyncPlayCommand" && data &&
+            ["Unpause", "Pause", "Seek", "Stop"].indexOf(data.Command) >= 0 &&
+            Number.isFinite(Date.parse(data.When)) &&
+            (data.Command === "Stop" || (group.entry && data.PlaylistItemId === group.entry.PlaylistItemId))) {
+          group.command = data;
+          clearTimeout(group.commandTimer);
+          group.commandTimer = null;
+          applyWatchCommand(group);
+        }
+      };
+      await Promise.all([watchClock(group), new Promise(function (resolve, reject) {
+        var timeout = setTimeout(function () { reject(new Error("Could not connect to Jellyfin SyncPlay.")); }, 5000);
+        socket.onopen = function () { clearTimeout(timeout); resolve(); };
+        socket.onerror = socket.onclose = function () { clearTimeout(timeout); reject(new Error("Could not connect to Jellyfin SyncPlay.")); };
+      })]);
+      if (!watchActive(group)) return;
+      socket.onclose = function () {
+        if (watchActive(group)) run(function () { return leaveWatchGroup(true, "Watch Together disconnected. Rejoin from the sidebar."); });
+      };
+      var result = await watchApi(group, groupId ? "Join" : "New", groupId ? {GroupId: groupId} : {GroupName: name});
+      if (!watchActive(group)) return;
+      group.joined = true;
+      if (result && result.GroupName) group.name = result.GroupName;
+      function ping() { return watchApi(group, "Ping", {Ping: group.ping}).catch(function () {}); }
+      ping();
+      group.clockTimer = setInterval(function () {
+        watchClock(group).then(function () { if (watchActive(group)) return ping(); }).catch(function () {});
+      }, 30000);
+    } catch (error) {
+      if (watchActive(group)) await leaveWatchGroup(false);
+      throw error;
+    }
+  }
+  async function watchTogetherPage() {
+    var r = reset("Watch Together"), account = session;
+    selectNav("watch-together");
+    var actions = el("div", null, main);
+    actions.className = "actions";
+    var backButton = button("Back", back, actions);
+    backButton.focus();
+    if (watchActive(watchGroup) && watchGroup.joined) {
+      el("p", "Group: " + watchGroup.name, main);
+      el("p", "Choose a movie or episode in Ember, or start one from Jellyfin Web.", main);
+      button("Leave group", async function () {
+        await leaveWatchGroup(true);
+        if (r === revision) return watchTogetherPage();
+      }, actions);
+      return;
+    }
+    var joining = false;
+    async function enter(name, id) {
+      if (joining || r !== revision || session !== account) return;
+      joining = true;
+      try {
+        await connectWatchGroup(name, id);
+        if (r === revision && !playing && watchActive(watchGroup)) return watchTogetherPage();
+      } finally { joining = false; }
+    }
+    button("Create group", function () { return enter((account.name || "Ember") + "’s watch group"); }, actions);
+    button("Refresh groups", watchTogetherPage, actions);
+    var groups = await api("/SyncPlay/List", null, null, "GET", {session: account, timeoutMs: 5000}).catch(function () { return null; });
+    if (r !== revision || session !== account) return;
+    if (!Array.isArray(groups)) { el("p", "Could not list groups. Check your Jellyfin SyncPlay permissions.", main); return; }
+    if (!groups.length) el("p", "No groups are available.", main);
+    groups.forEach(function (group) {
+      button("Join " + group.GroupName, function () { return enter(group.GroupName, group.GroupId); }, actions);
+    });
+  }
   async function play(item, ticks, resumeSaved, live, options) {
     options = options || {};
+    if (!options.watchGroup && watchActive(watchGroup) && watchGroup.joined) {
+      var group = watchGroup;
+      if (live) return message("Leave Watch Together to watch Live TV.");
+      if (resumeSaved) {
+        var fresh = await api("/Users/" + encodeURIComponent(group.account.user) + "/Items/" + encodeURIComponent(item.Id),
+          null, null, "GET", {session: group.account, timeoutMs: 5000});
+        ticks = fresh.UserData && fresh.UserData.PlaybackPositionTicks;
+      }
+      if (watchActive(group)) return watchApi(group, "SetNewQueue",
+        {PlayingQueue: [item.Id], PlayingItemPosition: 0, StartPositionTicks: Math.max(0, Number(ticks) || 0)});
+      return;
+    }
     if (live && playing && playing.live && item.ChannelId === playing.item.Id) {
       fullscreenLive();
       return;
@@ -8014,7 +8510,7 @@
     try {
       if (live) {
         if (!item.ChannelId)
-          throw new Error("This programme does not have a playable channel.");
+          throw new Error("This program does not have a playable channel.");
         item = await playbackApi(
           "/Users/" + session.user + "/Items/" + item.ChannelId,
         );
@@ -8156,10 +8652,10 @@
         IsPlayback: true,
         AutoOpenLiveStream: true,
         EnableDirectPlay: !forceTranscode,
-        EnableDirectStream: nativeMode && !qualityConversion,
+        EnableDirectStream: nativeMode && !qualityConversion && !policy.convertProfile7,
         EnableTranscoding: true,
         AllowVideoStreamCopy:
-          !options.compatibility && !qualityConversion && (!(deliveredSubtitleIndex >= 0) || (nativeMode && !!P.playbackPolicy)),
+          !options.compatibility && !qualityConversion && !policy.convertProfile7 && (!(deliveredSubtitleIndex >= 0) || (nativeMode && !!P.playbackPolicy)),
         MaxAudioChannels: nativeMode && P.playbackProfile
           ? Number(deviceProfile.TranscodingProfiles[0].MaxAudioChannels) || 2
           : nativeMode ? 6 : 2,
@@ -8197,7 +8693,10 @@
           positionTicks: previous.item.Id === item.Id ? ticks : undefined,
         });
       if (request !== playRequest || document.hidden) return;
+      if (options.watchGroup && (!watchActive(options.watchGroup) || options.watchGroup.entry !== options.watchEntry)) return;
       playing = Object.assign(selected, {
+        watchGroup: options.watchGroup,
+        watchEntry: options.watchEntry,
         item: item,
         account: session,
         episodeCount:
@@ -8284,12 +8783,21 @@
       if (logoId) setImageSource(playerLogo, session.server + "/Items/" + encodeURIComponent(logoId) + "/Images/Logo?maxWidth=400&quality=90" + C.imageTagQuery(item, "Logo", logoId));
       else playerLogo.removeAttribute("src");
       document.getElementById("end-time").textContent = "";
-      if (P.playbackTracks && video.configure)
-        video.configure(P.playbackTracks(selected, sourceMetadata, playing.audioIndex, playing.subtitleIndex, subtitleCues, nativeMode, { server: session.server, itemId: item.Id, token: session.token }));
+      if (P.playbackTracks && video.configure) {
+        var tracks = P.playbackTracks(selected, sourceMetadata, playing.audioIndex, playing.subtitleIndex, subtitleCues, nativeMode, { server: session.server, itemId: item.Id, token: session.token });
+        if (policy.convertProfile7 && selected.method === "DirectPlay" && selected.source.Id === sourceMetadata.Id)
+          tracks.convertProfile7 = true;
+        video.configure(tracks);
+      }
       if (P.configureDisplay) P.configureDisplay(nativeMode && !live ? localStorage.getItem("ember-display-matching") || "off" : "off");
       video.src = selected.url + (ticks ? "#t=" + ticks / 10000000 : "");
       resumeTimer = setInterval(finishResume, 250);
       video.load();
+      document.getElementById("leave-watch-group").hidden = !watchActive(playing.watchGroup);
+      if (video.setArtwork) video.setArtwork({
+        profile: systemProfile(playing.account), server: playing.account.server,
+        token: playing.account.token, item: playing.item.SeriesId || playing.item.Id,
+      });
       if (livePreview && activeGuide) activeGuide.focusChannel(item.Id);
       else document.getElementById("toggle").focus();
       message(subtitleNotice);
@@ -8342,6 +8850,7 @@
     }
     playing.hasPlayed = true;
     finishResume();
+    watchReport(playing && playing.watchGroup, false);
   };
   ["canplay", "durationchange", "progress", "seeked"].forEach(function (event) {
     video.addEventListener(event, finishResume);
@@ -8349,6 +8858,18 @@
   video.addEventListener("seeked", function () {
     if (playing && playing.started && !video.error)
       playing.lastPositionTicks = Math.round(video.currentTime * 10000000);
+  });
+  ["loadedmetadata", "canplay", "seeked", "timeupdate"].forEach(function (event) {
+    video.addEventListener(event, function () {
+      var group = playing && playing.watchGroup;
+      if (watchActive(group) && playing.started) {
+        watchReport(group, false);
+        applyWatchCommand(group);
+      }
+    });
+  });
+  video.addEventListener("waiting", function () {
+    if (playing && !video.paused && !video.seeking) watchReport(playing.watchGroup, true);
   });
   function formatTime(seconds) {
     seconds = Math.max(0, Math.floor(seconds || 0));
@@ -8425,29 +8946,28 @@
       ? "−" + formatTime(duration - elapsed)
       : "";
   };
-  video.onerror = function () {
+  function playbackFailed(active, reason, failureMessage) {
+    if (!active || playing !== active || active.fallbackInProgress || active.pendingCompatibility) return;
     if (
-      playing &&
-      playing.nativeMode &&
-      !document.hidden &&
-      !playing.fallbackInProgress
+      active.nativeMode &&
+      !document.hidden
     ) {
-      var active = playing;
+      active.fallbackReason = reason;
       if (busy) { active.pendingCompatibility = true; return; }
-      message(
-        "Native playback failed. Trying Compatibility at the same position…",
-      );
+      message(reason + ". Trying Compatibility at the same position…");
       run(function () {
         return compatibilityPlayback(active, true);
       });
       return;
     }
-    if (playing && playing.lastPositionTicks != null)
-      playing.failurePositionTicks = playing.lastPositionTicks;
-    message(
-      "Playback failed. Check server transcoding logs and TV codec support.",
-    );
+    if (active.lastPositionTicks != null)
+      active.failurePositionTicks = active.lastPositionTicks;
+    message(failureMessage);
     run(stop);
+  }
+  video.onerror = function () {
+    playbackFailed(playing, "Native playback failed",
+      "Playback failed. Check server transcoding logs and TV codec support.");
   };
   video.onended = function () {
     var active = playing;
@@ -8459,6 +8979,10 @@
     clearInterval(timer);
     run(async function () {
       await finishPlaybackReporting(active, active.completedPositionTicks);
+      if (playing === active && watchActive(active.watchGroup)) {
+        await watchApi(active.watchGroup, "Stop");
+        return;
+      }
       if (playing === active) return advancePlayback(false);
     });
   };
@@ -8499,6 +9023,9 @@
     hideSegment();
     disposeSeekTiles(stopped);
     playing = null;
+    if (!options.transition && !options.keepWatchGroup && watchActive(stopped.watchGroup))
+      run(function () { return leaveWatchGroup(true); });
+    document.getElementById("leave-watch-group").hidden = true;
     livePreview = false;
     document.body.classList.remove("live-preview");
     closeSubtitleSearch(false);
@@ -8518,18 +9045,27 @@
     )
       stopped.returnFocus.focus();
     await finishPlaybackReporting(stopped, ticks);
+    if (!options.transition && stopped.started && !stopped.live && P.syncContinueWatching && session === stopped.account) {
+      api("/Users/" + encodeURIComponent(stopped.account.user) + "/Items/Resume",
+        { Limit: 24, MediaTypes: "Video" }, null, "GET", { session: stopped.account })
+        .then(function (data) { publishSystemContinueWatching(data.Items || [], stopped.account); }).catch(function () {});
+    }
+    if (session === stopped.account) { homeCache.clear(); listingStates.clear(); previewCache.clear(); }
+    if (!options.transition && stopped.started && !stopped.live &&
+        session === stopped.account && main.refreshPlaybackRows)
+      main.refreshPlaybackRows();
     if (stopped.method === "Transcode") {
       try { await api("/Videos/ActiveEncodings", {DeviceId: device, PlaySessionId: stopped.sessionId}, null, "DELETE", {session: stopped.account, timeoutMs: 3000}); } catch (_) {}
     }
     if (stopped.source.LiveStreamId) {
       try { await api("/LiveStreams/Close", {LiveStreamId: stopped.source.LiveStreamId}, {LiveStreamId: stopped.source.LiveStreamId}, "POST", {session: stopped.account, timeoutMs: 3000}); } catch (_) {}
     }
-    if (session === stopped.account) { homeCache.clear(); listingStates.clear(); previewCache.clear(); }
     if (
       !options.transition &&
       stopped.started &&
       session === stopped.account &&
       !stopped.returnItem.IsLiveChannel &&
+      !main.refreshPlaybackRows &&
       revision === stoppedRevision &&
       !playing &&
       stopped.returnFocus &&
@@ -8623,9 +9159,11 @@
   });
   function toggle() {
     if (playing && playing.awaitingWatching) return;
+    if (playing && watchActive(playing.watchGroup)) return watchApi(playing.watchGroup, video.paused ? "Unpause" : "Pause");
     if (video.paused) return video.play();
     video.pause();
   }
+  document.getElementById("leave-watch-group").onclick = function () { run(stop); };
   function liveSeekWindow() {
     if (!playing || !playing.live || !playing.started || !video.seekable.length)
       return null;
@@ -8755,6 +9293,10 @@
     if (!Number.isFinite(base) || !Number.isFinite(end) || end <= start) return;
     var target = Math.max(start, Math.min(end, base + seconds)), delta = target - base;
     if (!delta) return;
+    if (watchActive(playing.watchGroup)) {
+      var group = playing.watchGroup;
+      return run(function () { return watchApi(group, "Seek", {PositionTicks: Math.round(target * 10000000)}); });
+    }
     var state = previous || { active: playing, sent: 0 };
     if (!previous || now - state.updated >= 800 || Math.sign(state.delta) !== Math.sign(delta)) state.delta = 0;
     state.delta += delta;
@@ -8785,6 +9327,10 @@
   }
   document.getElementById("timeline").oninput = function () {
     if (!playing || !playing.started || playing.awaitingWatching) return;
+    if (watchActive(playing.watchGroup)) {
+      showSeekPreview(Number(this.value), true);
+      return;
+    }
     clearSeekState();
     if (playing.live) {
       var range = liveSeekWindow();
@@ -8798,6 +9344,10 @@
     if (!playing.live) showSeekPreview(Number(this.value), true);
   };
   document.getElementById("timeline").onchange = function () {
+    if (playing && watchActive(playing.watchGroup)) {
+      var group = playing.watchGroup, target = Number(this.value);
+      return run(function () { return watchApi(group, "Seek", {PositionTicks: Math.round(target * 10000000)}); });
+    }
     run(function () {
       return report("/Progress");
     });
@@ -8809,7 +9359,7 @@
     if (!playing || !playing.started || document.hidden || busy || playing.awaitingWatching) return;
     var command = event.detail || {};
     if (command.action === "play" && video.paused) run(toggle);
-    else if (command.action === "pause" && !video.paused) { video.pause(); showControls(); }
+    else if (command.action === "pause" && !video.paused) { run(toggle); showControls(); }
     else if (command.action === "stop") run(stop);
     else if (command.action === "next" || command.action === "previous") {
       var control = document.getElementById(command.action + "-video");
@@ -9029,13 +9579,14 @@
       if (key === 415) {
         e.preventDefault();
         run(function () {
+          if (playing && watchActive(playing.watchGroup)) return watchApi(playing.watchGroup, "Unpause");
           return video.play();
         });
         return;
       }
       if (key === 19) {
         e.preventDefault();
-        video.pause();
+        if (!video.paused) run(toggle);
         return;
       }
       if (key === 179 || key === 32) {
@@ -9160,7 +9711,7 @@
           focusContent(cats[index + (key === 38 ? -1 : 1)]);
         else if (key === 39)
           focusContent(
-            category.settingsSection.querySelector("button:not(:disabled)"),
+            category.settingsSection.querySelector(".setting-row:not(:disabled):not([hidden])"),
           );
         else if (key === 37)
           focusContent(nav.querySelector('[aria-current="page"]'));
@@ -9168,7 +9719,7 @@
       }
       if (setting) {
         var rows = Array.prototype.slice.call(
-            main.querySelectorAll(".setting-row:not(:disabled)"),
+            main.querySelectorAll(".setting-row:not(:disabled):not([hidden])"),
           ),
           pos = rows.indexOf(setting);
         if (key === 38 || key === 40)
@@ -9403,9 +9954,14 @@
     if (next) focusContent(next);
   });
   document.addEventListener("ember-suspend", function () {
+    if (watchGroup && !playing) run(function () { return leaveWatchGroup(true); });
     run(stop);
   });
   document.addEventListener("visibilitychange", function () {
+    if (document.hidden && watchGroup) {
+      if (playing && watchActive(playing.watchGroup)) run(stop);
+      else run(function () { return leaveWatchGroup(true); });
+    }
     if (document.hidden) closeSubtitleSearch(false);
     if (document.hidden && cancelQuickConnect) {
       login();

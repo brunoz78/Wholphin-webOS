@@ -1,6 +1,8 @@
 package tv.ember.jellyfin;
 
 import android.app.Activity;
+import android.content.Intent;
+import android.graphics.BitmapFactory;
 import android.app.AlertDialog;
 import android.graphics.Color;
 import android.net.Uri;
@@ -41,6 +43,7 @@ import java.util.ArrayList;
 import androidx.media3.datasource.DefaultDataSource;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.extractor.DefaultExtractorsFactory;
+import androidx.media3.extractor.ExtractorsFactory;
 import io.github.peerless2012.ass.media.AssHandler;
 import io.github.peerless2012.ass.media.AssHandlerConfig;
 import io.github.peerless2012.ass.media.factory.AssRenderersFactory;
@@ -60,6 +63,10 @@ public final class MainActivity extends Activity {
     private PlayerView video;
     private ExoPlayer player;
     private PlaybackSession mediaSession;
+    private TvHomeIntegration tvHome;
+    private final java.util.concurrent.ExecutorService artworkWorker = java.util.concurrent.Executors.newSingleThreadExecutor();
+    private androidx.media3.exoplayer.analytics.PlaybackStatsListener playbackStats;
+    private String videoDecoder = "", audioDecoder = "";
     private AssHandler assHandler;
     private AssSubtitleView assView;
     private int externalSubtitle = -1;
@@ -114,6 +121,8 @@ public final class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        tvHome = new TvHomeIntegration(this);
+        tvHome.intent(getIntent());
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN |
             View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY |
@@ -200,7 +209,34 @@ public final class MainActivity extends Activity {
             });
         }
         @JavascriptInterface public String capabilities() {
-            return PlaybackCapabilities.read(MainActivity.this).toString();
+            JSONObject data = PlaybackCapabilities.read(MainActivity.this);
+            try { data.put("watchNextStatus", tvHome.status()); } catch (Exception ignored) {}
+            return data.toString();
+        }
+        @JavascriptInterface public void systemProfile(String profile) {
+            if (profile != null && profile.length() < 4096) tvHome.profile(profile);
+        }
+        @JavascriptInterface public void syncWatchNext(String raw) {
+            if (raw == null || raw.length() > 65536) return;
+            try { tvHome.sync(new JSONObject(raw)); } catch (Exception ignored) {}
+        }
+        @JavascriptInterface public String takeSystemResume(String profile) { return tvHome.takeResume(profile); }
+        @JavascriptInterface public void artwork(String raw) {
+            if (raw == null || raw.length() > 8192) return;
+            handler.post(() -> {
+                final int token = generation;
+                if (mediaSession == null) return;
+                artworkWorker.execute(() -> {
+                    try {
+                        java.io.File file = SystemArtwork.load(MainActivity.this, new JSONObject(raw));
+                        if (file == null) return;
+                        android.graphics.Bitmap bitmap = BitmapFactory.decodeFile(file.getAbsolutePath());
+                        handler.post(() -> {
+                            if (!destroyed && token == generation && mediaSession != null) mediaSession.setArtwork(bitmap);
+                        });
+                    } catch (Exception ignored) {}
+                });
+            });
         }
         @JavascriptInterface public void command(String raw) {
             if (raw == null || raw.length() > 32768) return;
@@ -234,14 +270,35 @@ public final class MainActivity extends Activity {
             subtitleTrack = tracks == null ? -1 : tracks.optInt("subtitle", -1);
             externalSubtitle = tracks == null ? -1 : tracks.optInt("externalIndex", -1);
             tracksApplied = false;
-            DefaultRenderersFactory renderers = new DefaultRenderersFactory(this).setEnableDecoderFallback(true);
+            final DolbyVisionConversion conversion;
+            if (tracks != null && tracks.optBoolean("convertProfile7")) {
+                if (!PlaybackCapabilities.read(this).optBoolean("dolbyVisionConversionAvailable")) { send("error"); return; }
+                try { conversion = new DolbyVisionConversion(); }
+                catch (LinkageError error) { send("error"); return; }
+            } else conversion = null;
+            DefaultRenderersFactory renderers = conversion == null ? new DefaultRenderersFactory(this) : conversion.renderers(this);
+            renderers.setEnableDecoderFallback(true);
             assHandler = new AssHandler(AssRenderType.OVERLAY_CANVAS, new AssHandlerConfig(10000, 128, 1920 * 1080));
             AssSubtitleParserFactory parser = new AssSubtitleParserFactory(assHandler);
-            DefaultMediaSourceFactory sources = new DefaultMediaSourceFactory(new DefaultDataSource.Factory(this),
-                AssPlayerKt.withAssMkvSupport(new DefaultExtractorsFactory(), parser, assHandler))
+            ExtractorsFactory extractors = AssPlayerKt.withAssMkvSupport(new DefaultExtractorsFactory(), parser, assHandler);
+            if (conversion != null) extractors = conversion.wrap(extractors);
+            DefaultMediaSourceFactory sources = new DefaultMediaSourceFactory(new DefaultDataSource.Factory(this), extractors)
                 .setSubtitleParserFactory(parser);
             player = new ExoPlayer.Builder(this, new AssRenderersFactory(assHandler, renderers))
                 .setMediaSourceFactory(sources).build();
+            videoDecoder = "";
+            audioDecoder = "";
+            playbackStats = new androidx.media3.exoplayer.analytics.PlaybackStatsListener(false, null);
+            player.addAnalyticsListener(playbackStats);
+            final int decoderGeneration = generation;
+            player.addAnalyticsListener(new androidx.media3.exoplayer.analytics.AnalyticsListener() {
+                @Override public void onVideoDecoderInitialized(EventTime event, String name, long timestamp, long duration) {
+                    if (generation == decoderGeneration) videoDecoder = name;
+                }
+                @Override public void onAudioDecoderInitialized(EventTime event, String name, long timestamp, long duration) {
+                    if (generation == decoderGeneration) audioDecoder = name;
+                }
+            });
             // Explicit mode matching owns cadence; do not race Media3's surface hints.
             player.setVideoChangeFrameRateStrategy(C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF);
             assHandler.init(player);
@@ -274,6 +331,9 @@ public final class MainActivity extends Activity {
                         if (player.getPlayWhenReady()) send("playing");
                     } else if (state == Player.STATE_ENDED) send("ended");
                     else if (state == Player.STATE_BUFFERING) send("waiting");
+                }
+                @Override public void onRenderedFirstFrame() {
+                    if (current() && conversion != null && !conversion.hasConverted()) send("error");
                 }
                 @Override public void onVideoSizeChanged(VideoSize size) {
                     if (current()) matchDisplay();
@@ -404,6 +464,21 @@ public final class MainActivity extends Activity {
                     .put("live", player.isCurrentMediaItemLive()).put("paused", !player.getPlayWhenReady())
                     .put("width", size.width).put("height", size.height);
                 Format format = player.getVideoFormat();
+                androidx.media3.exoplayer.DecoderCounters counters = player.getVideoDecoderCounters();
+                if (counters != null) counters.ensureUpdated();
+                androidx.media3.exoplayer.analytics.PlaybackStats stats = playbackStats == null ? null : playbackStats.getCombinedPlaybackStats();
+                Format audio = player.getAudioFormat();
+                data.put("diagnostics", new JSONObject()
+                    .put("bufferMs", player.getTotalBufferedDuration())
+                    .put("state", player.getPlaybackState())
+                    .put("dropped", counters == null ? JSONObject.NULL : counters.droppedBufferCount)
+                    .put("rendered", counters == null ? JSONObject.NULL : counters.renderedOutputBufferCount)
+                    .put("videoDecoder", videoDecoder).put("audioDecoder", audioDecoder)
+                    .put("frameRate", format == null ? -1 : format.frameRate)
+                    .put("audioMime", audio == null || audio.sampleMimeType == null ? "" : audio.sampleMimeType)
+                    .put("audioChannels", audio == null ? -1 : audio.channelCount)
+                    .put("rebufferCount", stats == null ? 0 : stats.totalRebufferCount)
+                    .put("rebufferMs", stats == null ? 0 : stats.getTotalRebufferTimeMs()));
                 if (format != null) data.put("format", new JSONObject()
                     .put("mime", format.sampleMimeType == null ? "" : format.sampleMimeType)
                     .put("codecs", format.codecs == null ? "" : format.codecs)
@@ -459,6 +534,13 @@ public final class MainActivity extends Activity {
         super.onResume();
         foreground = true;
         if (updater != null) updater.status();
+        if (web != null) web.evaluateJavascript("document.dispatchEvent(new Event('ember-system-resume'))", null);
+    }
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        tvHome.intent(intent);
+        if (web != null) web.evaluateJavascript("document.dispatchEvent(new Event('ember-system-resume'))", null);
     }
     @Override protected void onPause() {
         foreground = false;
@@ -472,6 +554,8 @@ public final class MainActivity extends Activity {
         destroyed = true;
         if (seerr != null) seerr.close();
         if (updater != null) updater.close();
+        tvHome.close();
+        artworkWorker.shutdownNow();
         handler.removeCallbacksAndMessages(null);
         release();
         web.removeJavascriptInterface("EmberAndroid");
