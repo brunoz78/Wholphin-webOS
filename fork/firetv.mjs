@@ -187,8 +187,6 @@ await edit("app/src/main/AndroidManifest.xml", [
   ['android:label="Ember"', 'android:label="Wholphin"', true],
   ['android:icon="@drawable/ember_launcher_tile"', 'android:icon="@drawable/ember_app_icon"', true],
   ['android:name=".EmberLauncher"', 'android:name=".WholphinLauncher3"'],
-  // One instance only: starting the app again brings the open one to the front.
-  ['<activity android:name=".MainActivity" android:exported="true"', '<activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask"'],
 ]);
 const art = path.join(project, "app/src/main/res/drawable-nodpi");
 await fs.copyFile(path.join(fork, "assets/firetv/wholphin_banner.png"), path.join(art, "ember_launcher_tile.png"));
