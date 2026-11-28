@@ -1,11 +1,18 @@
 (function (root) {
   "use strict";
   var receive = function () {}, updateListener = function () {};
+  var voiceRequest = null, voiceId = 0;
   function command(action, values) {
     root.EmberAndroid.command(JSON.stringify(Object.assign({ action: action }, values || {})));
   }
   var seerrJobs = {}, seerrId = 0;
   root.EmberFireTV = {
+    voiceSearchResult: function (result) {
+      if (!voiceRequest || result.id !== voiceRequest.id) return;
+      var resolve = voiceRequest.resolve;
+      voiceRequest = null;
+      resolve(result);
+    },
     updateResult: function (data) { updateListener(data); },
     seerrResult: function (result) {
       var job = seerrJobs[result.id];
@@ -27,6 +34,9 @@
   };
   function capabilities() {
     try { return JSON.parse(root.EmberAndroid.capabilities()); } catch (_) { return {}; }
+  }
+  function supportsHomeSearch() {
+    try { return root.EmberAndroid.supportsHomeSearch(); } catch (_) { return false; }
   }
   function hdrOptions() {
     try { return JSON.parse(localStorage.getItem("ember-hdr-options")) || {}; } catch (_) { return {}; }
@@ -64,6 +74,22 @@
     deviceName = deviceIdentity.deviceName || "Fire TV",
     playbackName = deviceIdentity.playbackName || deviceName + " Media3";
   root.EmberPlatform = {
+    homeSearch: supportsHomeSearch() ? {
+      profile: function (profile) { root.EmberAndroid.homeSearchProfile(profile); },
+      publish: function (profile, items) { root.EmberAndroid.publishHomeTitles(profile, JSON.stringify(items)); },
+      takeTitle: function (profile) { return JSON.parse(root.EmberAndroid.takeHomeTitle(profile) || "null"); },
+    } : null,
+    voiceSearch: root.EmberAndroid && typeof root.EmberAndroid.voiceSearch === "function"
+      ? function () {
+          if (voiceRequest) return Promise.resolve({status: "cancelled"});
+          return new Promise(function (resolve) {
+            var id = ++voiceId;
+            voiceRequest = {id: id, resolve: resolve};
+            try { root.EmberAndroid.voiceSearch(id); }
+            catch (_) { voiceRequest = null; resolve({status: "unavailable"}); }
+          });
+        }
+      : null,
     setSystemProfile: function (profile) {
       try { root.EmberAndroid.systemProfile(profile); } catch (_) {}
     },
