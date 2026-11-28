@@ -162,10 +162,12 @@ await edit("app/build.gradle", [
   ["applicationId 'tv.ember.jellyfin'", `applicationId '${APP_ID}'`],
   ["versionCode parts[0] * 1000000 + parts[1] * 10000 + parts[2]", `versionCode ${versionCode}`],
   ["versionName emberVersion", `versionName '${release}'`],
+  // Voice search of the home screen: its authority follows the app ID.
+  ["'tv.ember.jellyfin.search'", `'${APP_ID}.search'`],
+  ["'tv.ember.jellyfin.debug.search'", `'${APP_ID}.debug.search'`],
   [
-    "    buildTypes.debug { applicationIdSuffix '.debug' }",
-    "    buildTypes.debug { applicationIdSuffix '.debug' }\n" +
-      "    if (System.getenv('WHOLPHIN_KEYSTORE')) {\n" +
+    "    compileOptions {",
+    "    if (System.getenv('WHOLPHIN_KEYSTORE')) {\n" +
       "        signingConfigs {\n" +
       "            release {\n" +
       "                storeFile file(System.getenv('WHOLPHIN_KEYSTORE'))\n" +
@@ -176,7 +178,8 @@ await edit("app/build.gradle", [
       "            }\n" +
       "        }\n" +
       "        buildTypes.release.signingConfig signingConfigs.release\n" +
-      "    }",
+      "    }\n" +
+      "    compileOptions {",
   ],
 ]);
 // The launcher keeps a tile's picture per launcher entry: a new picture needs a new entry name.
